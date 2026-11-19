@@ -511,7 +511,7 @@ export default function Review() {
             Click "Run {activeBrand.name} Checks" to evaluate your copy against approved facts, specs, and guidelines.
           </Empty>
         ) : open.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "30px 16px", background: "rgba(31, 170, 140, 0.08)", border: "1px solid rgba(31, 170, 140, 0.3)", borderRadius: 12 }}>
+          <div style={{ textAlign: "center", padding: "30px 16px", background: "color-mix(in srgb, var(--ok) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--ok) 35%, transparent)", borderRadius: 12 }}>
             <Icon name="check" size={28} style={{ color: "var(--ok)", marginBottom: 8 }} />
             <h3 className="serif" style={{ margin: "4px 0", color: "var(--ok)" }}>All Findings Resolved</h3>
             <p className="muted small" style={{ margin: 0 }}>This copy is fully compliant with {activeBrand.name} approved standards.</p>
