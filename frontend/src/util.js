@@ -7,9 +7,9 @@ export const STATUS = {
 
 export const CATEGORY_COLOR = {
   "Facts & claims": "#F5B84B",
-  Terminology: "#8E7CFF",
+  Terminology: "var(--accent)",
   "Language & tone": "#3DD6B0",
-  "Brand aura": "#F180FE",
+  "Brand aura": "var(--accent)",
   "Content patterns": "#5CC8FF",
   "Visual identity": "#FF8A7A",
   "Access & channel fit": "#7BE08F",
@@ -71,7 +71,7 @@ export function diffWords(a, b) {
 export function lightFinding(f) {
   return {
     key: f.key, ruleId: f.ruleId, label: f.label, category: f.category, strictness: f.strictness,
-    quote: f.quote, status: f.status || "open", note: f.note, suggestion: f.suggestion, source: f.source,
+    quote: f.quote, severity: f.severity, count: f.count, status: f.status || "open", note: f.note, suggestion: f.suggestion, source: f.source,
     needsHuman: f.status === "open" ? !!f.needsHuman : false,
   };
 }

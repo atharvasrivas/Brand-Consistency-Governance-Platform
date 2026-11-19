@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: brand-governance-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 1 --threads 4
+    envVars:
+      - key: AUTH_MODE
+        value: demo
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: STORE
+        value: sqlite

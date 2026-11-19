@@ -1,270 +1,686 @@
 import React, { useMemo, useState } from "react";
 import Icon from "../components/Icon.jsx";
-import { Field, PageHead, Pill } from "../components/ui.jsx";
+import { Field, PageHead, Pill, ColorPickerField, FileUploadField, AssetList } from "../components/ui.jsx";
+import FactSheetAssistant from "../components/FactSheetAssistant.jsx";
 import { useStore } from "../store.jsx";
-import { RULE_GROUPS, USERS } from "../engine/seed.js";
 import { findConflicts } from "../engine/checker.js";
 import { timeAgo } from "../util.js";
+import { assetUrl, uploadAsset, API_CONFIGURED } from "../api.js";
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
-const list = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
-const lines = (s) => s.split("\n").map((x) => x.trim()).filter(Boolean);
-
-function groupMandatory(d, g) {
-  const ruleOk = g.rules.length === 0 || g.rules.every((id) => (d.rules.find((r) => r.id === id) || {}).strictness === "mandatory");
-  const imgOk = !g.image || g.image.every((k) => d.imageRules[k] === "mandatory");
-  return ruleOk && imgOk;
-}
-
-function applyDerived(d) {
-  const next = clone(d);
-  const current = next.productName.current.trim() || next.brandName;
-  next.productName.current = current;
-  next.brandName = current;
-  const t = next.rules.find((r) => r.id === "T-NAME");
-  if (t) t.pairs = next.productName.former.map((f) => [f, current]);
-  const st = next.rules.find((r) => r.id === "C-STAT");
-  if (st) st.approved = next.approvedClaims.filter((c) => /\d/.test(c));
-  return next;
-}
-
-function summarise(a, b) {
-  const out = [];
-  if (a.productName.current !== b.productName.current || a.productName.former.join() !== b.productName.former.join()) out.push(`Product name set to ${b.productName.current}`);
-  if (a.approvedClaims.join("|") !== b.approvedClaims.join("|")) out.push("Approved claims updated");
-  if (a.voice.join() !== b.voice.join()) out.push("Voice updated");
-  if (JSON.stringify(a.rules.map((r) => [r.id, r.strictness, r.pairs])) !== JSON.stringify(b.rules.map((r) => [r.id, r.strictness, r.pairs]))) out.push("Rules changed");
-  if (JSON.stringify([a.palette, a.fonts, a.approvedAssets, a.deprecatedAssets, a.imageRules]) !== JSON.stringify([b.palette, b.fonts, b.approvedAssets, b.deprecatedAssets, b.imageRules])) out.push("Visual identity updated");
-  return out.join("; ") || "Profile updated";
-}
+const list = (s) => (s || "").split(",").map((x) => x.trim()).filter(Boolean);
+const lines = (s) => (s || "").split("\n").map((x) => x.trim()).filter(Boolean);
 
 export default function Profile() {
   const { state, dispatch } = useStore();
-  const { profile, role, changelog } = state;
-  const isManager = role === "manager";
-  const [d, setD] = useState(() => clone(profile));
-  const [former, setFormer] = useState(profile.productName.former.join(", "));
-  const [claims, setClaims] = useState(profile.approvedClaims.join("\n"));
-  const [voice, setVoice] = useState(profile.voice.join(", "));
-  const [fonts, setFonts] = useState(profile.fonts.join(", "));
-  const [assets, setAssets] = useState(profile.approvedAssets.join(", "));
-  const [retired, setRetired] = useState(profile.deprecatedAssets.join(", "));
-  const [nr, setNr] = useState({ from: "", to: "", strictness: "flexible", doc: "Brand Guidelines", ref: "" });
-  const [col, setCol] = useState({ name: "", hex: "#5B4CE0" });
-  const [saved, setSaved] = useState("");
+  const { brands, activeBrandId, role, changelog } = state;
+  const isOwner = role === "owner" || role === "manager";
+  const isCreator = role === "creator";
 
-  const working = useMemo(() => applyDerived({
-    ...d,
-    productName: { current: d.productName.current, former: list(former) },
-    approvedClaims: lines(claims),
-    voice: list(voice),
-    fonts: list(fonts),
-    approvedAssets: list(assets),
-    deprecatedAssets: list(retired),
-  }), [d, former, claims, voice, fonts, assets, retired]);
+  const activeBrand = brands.find((b) => b.id === activeBrandId) || brands[0];
 
-  const dirty = JSON.stringify(working) !== JSON.stringify({ ...clone(profile), version: working.version });
-  const conflicts = findConflicts(working);
-  const rulesShown = working.rules.filter((r) => r.kind !== "structure");
+  const [d, setD] = useState(() => clone(activeBrand));
+  const [activeTab, setActiveTab] = useState("overview"); // "overview", "products", "rules", "visuals", "history"
+  const [showAssistant, setShowAssistant] = useState(false);
+  const [showNewBrandModal, setShowNewBrandModal] = useState(false);
+  const [showProductModal, setShowProductModal] = useState(false);
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [showSuggestModal, setShowSuggestModal] = useState(false);
+  const [suggestionText, setSuggestionText] = useState("");
+  const [savedMsg, setSavedMsg] = useState("");
 
-  function toggleGroup(g, on) {
-    const s = on ? "mandatory" : "flexible";
-    setD((p) => {
-      const n = clone(p);
-      n.rules.forEach((r) => { if (g.rules.includes(r.id)) r.strictness = s; });
-      (g.image || []).forEach((k) => { n.imageRules[k] = s; });
-      return n;
+  // Update working state when switching brands
+  const handleSelectBrand = (brandId) => {
+    dispatch({ type: "selectBrand", brandId });
+    const b = brands.find((x) => x.id === brandId) || brands[0];
+    setD(clone(b));
+    setSavedMsg("");
+  };
+
+  const conflicts = useMemo(() => findConflicts(d), [d]);
+
+  const handleSaveBrand = async () => {
+    if (!isOwner) return;
+    await dispatch({
+      type: "saveBrand",
+      brand: d,
+      summary: `Updated ${d.name} brand fact sheet and specifications`,
     });
-  }
+    setSavedMsg("Brand profile saved successfully! Version bumped.");
+    setTimeout(() => setSavedMsg(""), 3500);
+  };
 
-  function setStrict(id, s) {
-    setD((p) => ({ ...p, rules: p.rules.map((r) => (r.id === id ? { ...r, strictness: s } : r)) }));
-  }
+  const handleAddProduct = (prodData) => {
+    const brandId = d.id;
+    const prodId = prodData.id || `p-${Date.now().toString(36)}`;
+    const product = { ...prodData, id: prodId, brandId };
+    dispatch({ type: "saveProduct", brandId, product });
+    setD((prev) => {
+      const existing = prev.products || [];
+      const idx = existing.findIndex((p) => p.id === product.id);
+      const nextProds = idx >= 0 ? existing.map((p, i) => (i === idx ? product : p)) : [...existing, product];
+      return { ...prev, products: nextProds };
+    });
+    setShowProductModal(false);
+    setEditingProduct(null);
+  };
 
-  function addRule() {
-    if (!nr.from.trim() || !nr.to.trim()) return;
-    const id = `T-U${Date.now().toString(36)}`;
-    setD((p) => ({
-      ...p,
-      rules: [...p.rules.slice(0, -1), {
-        id, kind: "term", strictness: nr.strictness, since: p.version + 1, label: "Preferred term", category: "Terminology",
-        pairs: [[nr.from.trim(), nr.to.trim()]], why: `${nr.doc} says to use “${nr.to.trim()}” instead of “${nr.from.trim()}”.`,
-        source: { doc: nr.doc.trim() || "Brand Guidelines", ref: nr.ref.trim() || "Added by brand manager" },
-      }, p.rules[p.rules.length - 1]],
-    }));
-    setNr({ ...nr, from: "", to: "", ref: "" });
-  }
-
-  function resolve(c, winner) {
-    const loser = winner === "a" ? c.b : c.a;
-    const drop = winner === "a" ? c.pairsB : c.pairsA;
-    setD((p) => ({
-      ...p,
-      rules: p.rules.map((r) => (r.id === loser.id ? { ...r, pairs: r.pairs.filter(([x, y]) => !drop.some(([dx, dy]) => dx === x && dy === y)) } : r)),
-    }));
-  }
-
-  async function save() {
-    const summary = summarise(profile, working);
-    const done = await dispatch({ type: "profile", profile: working, by: USERS.manager.name, summary });
-    if (!done) return;
-    setD(clone(working));
-    setSaved(`Saved as version ${profile.version + 1}. Existing submissions can now be re-checked against it.`);
-    setTimeout(() => setSaved(""), 5000);
-  }
-
-  function reset() {
-    setD(clone(profile));
-    setFormer(profile.productName.former.join(", "));
-    setClaims(profile.approvedClaims.join("\n"));
-    setVoice(profile.voice.join(", "));
-    setFonts(profile.fonts.join(", "));
-    setAssets(profile.approvedAssets.join(", "));
-    setRetired(profile.deprecatedAssets.join(", "));
-  }
-
-  const mandatoryLabels = RULE_GROUPS.filter((g) => groupMandatory(working, g)).map((g) => g.label);
+  const handleSuggest = (e) => {
+    e.preventDefault();
+    if (!suggestionText.trim()) return;
+    dispatch({
+      type: "suggestProfile",
+      brandId: d.id,
+      brandName: d.name,
+      title: `Creator suggestion for ${d.name}`,
+      proposed: suggestionText.trim(),
+    });
+    setShowSuggestModal(false);
+    setSuggestionText("");
+    alert("Suggestion submitted to Brand Owner! Reviewers and Owners can view and approve it in the Approvals tab.");
+  };
 
   return (
-    <div className="page">
-      <PageHead eyebrow="Brand setup" title="Answer questions. Get your fact sheet.">
-        <Pill tone="info">Version {profile.version}</Pill>
-        {isManager ? <Pill tone="ok">You can edit</Pill> : <Pill tone="muted">Read-only</Pill>}
+    <div className="setup">
+      <PageHead eyebrow="Multi-Brand Governance Studio" title="Brand Fact Sheets & Specifications">
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          {isCreator && (
+            <button className="btn" onClick={() => setShowSuggestModal(true)}>
+              <Icon name="edit" size={15} /> Suggest Profile Changes
+            </button>
+          )}
+          <button className="btn" onClick={() => setShowAssistant(true)}>
+            <Icon name="sparkles" size={15} /> AI Fact-Sheet Assistant
+          </button>
+          {isOwner && (
+            <button className="btn btn-primary" onClick={handleSaveBrand}>
+              <Icon name="check" size={16} /> Save Changes (v{(d.version || 1) + 1})
+            </button>
+          )}
+        </div>
       </PageHead>
-      {!isManager && (
-        <div className="banner"><Icon name="lock" size={16} /><div><b>Only brand managers edit the profile</b><p>You can read everything here. Switch to “Brand Manager” at the top right to make changes.</p></div></div>
-      )}
 
-      <fieldset className="plain" disabled={!isManager}>
-        <div className="setup">
-          <section className="panel">
-            <div className="panel-h"><h2>The platform asks</h2></div>
-            <Field label="What is your product called today?"><input className="input" value={d.productName.current} onChange={(e) => setD({ ...d, productName: { ...d.productName, current: e.target.value } })} /></Field>
-            <Field label="What was it called before?" hint="Separate with commas. These become mandatory “do not use” terms."><input className="input" value={former} onChange={(e) => setFormer(e.target.value)} /></Field>
-            <Field label="Which claims are approved?" hint="One per line. Anything stronger needs an approved source."><textarea className="input" rows={3} value={claims} onChange={(e) => setClaims(e.target.value)} /></Field>
-            <Field label="Describe your voice in three words" hint="Comma separated"><input className="input" value={voice} onChange={(e) => setVoice(e.target.value)} /></Field>
-            <div className="field">
-              <span className="field-l">Which rules are mandatory?</span>
-              <div className="checks">
-                {RULE_GROUPS.map((g) => (
-                  <label key={g.id} className="check"><input type="checkbox" checked={groupMandatory(working, g)} onChange={(e) => toggleGroup(g, e.target.checked)} /> {g.label}</label>
-                ))}
-              </div>
-              <span className="field-h">Mandatory rules block submission until fixed or overridden with a reason. The rest are flexible guidance.</span>
-            </div>
-          </section>
-
-          <section className="panel fact">
-            <div className="fact-head"><b>BRAND FACT SHEET</b><span className="auto-badge">AUTO-GENERATED</span></div>
-            <div className="fact-body">
-              <div><span className="fact-l">Names &amp; terms</span><p>{working.productName.current}{working.productName.former.length > 0 && <> (not {working.productName.former.map((f) => `“${f}”`).join(", ")})</>}</p></div>
-              <div><span className="fact-l">Approved claims</span>{working.approvedClaims.length ? working.approvedClaims.map((c) => <p key={c}>“{c}”</p>) : <p className="muted">None yet</p>}</div>
-              <div><span className="fact-l">Voice &amp; tone</span><p>{working.voice.join(" · ") || "Not set"}</p></div>
-              <div><span className="fact-l">Mandatory rules</span><p>{mandatoryLabels.join(", ") || "None"}</p></div>
-              <div><span className="fact-l">Visual identity</span><div className="swatches">{working.palette.map((p) => <span key={p.hex + p.name} className="sw" style={{ background: p.hex }} title={`${p.name} ${p.hex}`} />)}</div><p className="small muted">{working.fonts.join(", ") || "No fonts set"} · Logo: {working.approvedAssets[0] || "not set"}</p></div>
-            </div>
-            <p className="fact-foot">A brand manager reviews it before it goes live.</p>
-          </section>
+      {/* Brand Switcher Bar */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 12, padding: "10px 16px", marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, overflowX: "auto" }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700, textTransform: "uppercase", color: "var(--muted)", marginRight: 6 }}>
+            Saved Brands:
+          </span>
+          {brands.map((b) => (
+            <button
+              key={b.id}
+              className={`btn ${b.id === d.id ? "btn-primary" : ""}`}
+              style={{ height: 32, fontSize: 13, padding: "0 14px" }}
+              onClick={() => handleSelectBrand(b.id)}
+            >
+              {b.name} <span style={{ opacity: 0.7, fontSize: 11 }}>v{b.version || 1}</span>
+            </button>
+          ))}
+          {isOwner && (
+            <button className="btn" style={{ height: 32, fontSize: 12.5 }} onClick={() => setShowNewBrandModal(true)}>
+              <Icon name="plus" size={14} /> New Brand
+            </button>
+          )}
         </div>
 
-        <section className="panel">
-          <div className="panel-h"><h2>Rules and sources</h2><span className="muted small">Every finding cites one of these</span></div>
-          <div className="table-wrap">
-            <table className="tbl">
-              <thead><tr><th>Rule</th><th>What it checks</th><th>Source</th><th>Strictness</th></tr></thead>
-              <tbody>
-                {rulesShown.map((r) => (
-                  <tr key={r.id}>
-                    <td><b>{r.label}</b><div className="muted small">{r.category}</div></td>
-                    <td className="small">{r.pairs ? r.pairs.map(([a, b]) => `${a} → ${b}`).join(", ") : r.why}</td>
-                    <td className="small">{r.source ? `${r.source.doc} · ${r.source.ref}` : "Approved Examples"}</td>
-                    <td>
-                      <select className="input sm-in" value={r.strictness} onChange={(e) => setStrict(r.id, e.target.value)} aria-label={`Strictness for ${r.label}`}>
-                        <option value="mandatory">Mandatory</option>
-                        <option value="flexible">Flexible</option>
-                      </select>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="add-rule">
-            <b className="small">Add a terminology rule</b>
-            <div className="grid-4">
-              <input className="input" placeholder="Avoid" value={nr.from} onChange={(e) => setNr({ ...nr, from: e.target.value })} aria-label="Term to avoid" />
-              <input className="input" placeholder="Use instead" value={nr.to} onChange={(e) => setNr({ ...nr, to: e.target.value })} aria-label="Preferred term" />
-              <input className="input" placeholder="Source document" value={nr.doc} onChange={(e) => setNr({ ...nr, doc: e.target.value })} aria-label="Source document" />
-              <input className="input" placeholder="Section" value={nr.ref} onChange={(e) => setNr({ ...nr, ref: e.target.value })} aria-label="Source section" />
-            </div>
-            <div className="row-gap">
-              <select className="input sm-in" value={nr.strictness} onChange={(e) => setNr({ ...nr, strictness: e.target.value })} aria-label="New rule strictness"><option value="flexible">Flexible</option><option value="mandatory">Mandatory</option></select>
-              <button className="btn sm" disabled={!nr.from.trim() || !nr.to.trim()} onClick={addRule}><Icon name="plus" size={14} /> Add rule</button>
-            </div>
-          </div>
-        </section>
-
-        {conflicts.length > 0 && (
-          <section className="panel conflict-panel">
-            <div className="panel-h"><h2><Icon name="alert" size={18} /> Guideline conflict alert</h2><span className="muted small">The platform will not guess between these</span></div>
-            {conflicts.map((c, i) => (
-              <div key={i} className="conflict">
-                <div className="conflict-pair">
-                  <div className="cbox"><b>{c.a.source.doc}</b><span className="muted small">{c.a.source.ref}</span>{c.pairsA.map(([x, y]) => <p key={x}>“{x}” → “{y}”</p>)}</div>
-                  <span className="neq">≠</span>
-                  <div className="cbox"><b>{c.b.source.doc}</b><span className="muted small">{c.b.source.ref}</span>{c.pairsB.map(([x, y]) => <p key={x}>“{x}” → “{y}”</p>)}</div>
-                </div>
-                <div className="row-gap wrap">
-                  <span className="muted small">Both rules touch “{c.term}”. Which source wins?</span>
-                  <button className="btn sm" onClick={() => resolve(c, "a")}>{c.a.source.doc}</button>
-                  <button className="btn sm" onClick={() => resolve(c, "b")}>{c.b.source.doc}</button>
-                </div>
-              </div>
-            ))}
-          </section>
-        )}
-
-        <section className="panel">
-          <div className="panel-h"><h2>Visual identity</h2></div>
-          <div className="grid-2">
-            <div className="field">
-              <span className="field-l">Colour palette</span>
-              <div className="palette-list">
-                {working.palette.map((p) => (
-                  <span key={p.hex + p.name} className="pal"><span className="sw" style={{ background: p.hex }} /> {p.name} <span className="mono small muted">{p.hex}</span>
-                    <button className="icon-btn" aria-label={`Remove ${p.name}`} onClick={() => setD((x) => ({ ...x, palette: x.palette.filter((q) => q.hex !== p.hex || q.name !== p.name) }))}><Icon name="x" size={12} /></button>
-                  </span>
-                ))}
-              </div>
-              <div className="row-gap">
-                <input className="input" placeholder="Colour name" value={col.name} onChange={(e) => setCol({ ...col, name: e.target.value })} aria-label="Colour name" />
-                <input type="color" className="color-in" value={col.hex} onChange={(e) => setCol({ ...col, hex: e.target.value })} aria-label="Colour value" />
-                <button className="btn sm" disabled={!col.name.trim()} onClick={() => { setD((x) => ({ ...x, palette: [...x.palette, { name: col.name.trim(), hex: col.hex.toUpperCase() }] })); setCol({ name: "", hex: col.hex }); }}>Add</button>
-              </div>
-            </div>
-            <div>
-              <Field label="Approved fonts" hint="Comma separated"><input className="input" value={fonts} onChange={(e) => setFonts(e.target.value)} /></Field>
-              <Field label="Approved logo assets" hint="File names"><input className="input" value={assets} onChange={(e) => setAssets(e.target.value)} /></Field>
-              <Field label="Retired logo or asset names" hint="Images whose file name contains one of these are flagged"><input className="input" value={retired} onChange={(e) => setRetired(e.target.value)} /></Field>
-            </div>
-          </div>
-        </section>
-      </fieldset>
-
-      <div className="submit-bar">
-        <div className="sb-info">{saved ? <span className="ok-txt"><Icon name="check" size={16} /> {saved}</span> : dirty ? <span className="warn-txt">Unsaved changes. Saving creates version {profile.version + 1}.</span> : <span className="muted">No unsaved changes.</span>}</div>
-        <button className="btn" disabled={!dirty || !isManager} onClick={reset}>Discard</button>
-        <button className="btn btn-primary lg" disabled={!dirty || !isManager} onClick={save}><Icon name="check" size={18} /> Save as version {profile.version + 1}</button>
+        {savedMsg && <span className="ok-txt" style={{ fontSize: 13 }}><Icon name="check" size={14} /> {savedMsg}</span>}
       </div>
 
-      <section className="panel">
-        <div className="panel-h"><h2>Profile history</h2></div>
-        <ol className="timeline">
-          {[...changelog].reverse().map((c) => (
-            <li key={c.version}><span className="tl-dot" /><div><b>Version {c.version}</b> <span className="muted small">· {c.by} · {timeAgo(c.at)}</span><p>{c.summary}</p></div></li>
-          ))}
-        </ol>
-      </section>
+      {/* Permissions Notification for Creator/Reviewer */}
+      {!isOwner && (
+        <div style={{ background: "color-mix(in srgb, var(--accent) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--accent) 25%, transparent)", borderRadius: 10, padding: "10px 16px", marginBottom: 18, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ fontSize: 13 }}>
+            <Icon name="shield" size={15} style={{ color: "var(--accent)", marginRight: 8, verticalAlign: "middle" }} />
+            <b>{role === "creator" ? "Creator Perspective" : "Reviewer Perspective"}:</b> Only Brand Owners can publish official edits. You can view all approved rules, specs, and claims.
+          </div>
+          {isCreator && (
+            <button className="btn sm" onClick={() => setShowSuggestModal(true)}>
+              Suggest Change
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Main Studio Navigation Tabs */}
+      <div className="tabs" style={{ marginBottom: 16 }}>
+        <button className={`tab ${activeTab === "overview" ? "on" : ""}`} onClick={() => setActiveTab("overview")}>
+          Brand Overview & Logo
+        </button>
+        <button className={`tab ${activeTab === "products" ? "on" : ""}`} onClick={() => setActiveTab("products")}>
+          Product Fact Sheets ({d.products?.length || 0})
+        </button>
+        <button className={`tab ${activeTab === "visuals" ? "on" : ""}`} onClick={() => setActiveTab("visuals")}>
+          Visual Identity & Palette
+        </button>
+        <button className={`tab ${activeTab === "history" ? "on" : ""}`} onClick={() => setActiveTab("history")}>
+          Version Changelog
+        </button>
+      </div>
+
+      {/* TAB 1: Brand Overview & Logo */}
+      {activeTab === "overview" && (
+        <section className="panel" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div className="panel-h">
+            <h2>{d.name} Brand Fact Sheet</h2>
+            <Pill tone="ok">Version {d.version || 1}</Pill>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <Field label="Brand Name">
+                <input
+                  className="inp"
+                  value={d.name || ""}
+                  disabled={!isOwner}
+                  onChange={(e) => setD({ ...d, name: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Brand Description & Purpose" hint="Overview of what the brand represents">
+                <textarea
+                  className="inp"
+                  rows={3}
+                  value={d.description || ""}
+                  disabled={!isOwner}
+                  onChange={(e) => setD({ ...d, description: e.target.value })}
+                />
+              </Field>
+
+              <Field label="Tagline">
+                <input className="inp" value={d.tagline || ""} disabled={!isOwner} onChange={(e) => setD({ ...d, tagline: e.target.value })} />
+              </Field>
+              <Field label="Industry">
+                <input className="inp" value={d.industry || ""} disabled={!isOwner} onChange={(e) => setD({ ...d, industry: e.target.value })} />
+              </Field>
+              <Field label="Brand History" hint="Milestones and timeline">
+                <textarea className="inp" rows={3} value={d.history || ""} disabled={!isOwner} onChange={(e) => setD({ ...d, history: e.target.value })} />
+              </Field>
+              <Field label="Brand Values" hint="Comma-separated">
+                <input className="inp" value={d.valuesText || ""} disabled={!isOwner} onChange={(e) => setD({ ...d, valuesText: e.target.value })} />
+              </Field>
+              <Field label="Target Audience">
+                <textarea className="inp" rows={2} value={d.targetAudience || ""} disabled={!isOwner} onChange={(e) => setD({ ...d, targetAudience: e.target.value })} />
+              </Field>
+              <Field label="Brand Voice" hint="How the brand speaks">
+                <textarea className="inp" rows={2} value={d.voiceText || ""} disabled={!isOwner} onChange={(e) => setD({ ...d, voiceText: e.target.value })} />
+              </Field>
+
+              <Field label="Heritage & Origin" hint="Founding story, country of origin, and heritage">
+                <textarea
+                  className="inp"
+                  rows={2}
+                  value={d.heritage || ""}
+                  disabled={!isOwner}
+                  onChange={(e) => setD({ ...d, heritage: e.target.value })}
+                />
+              </Field>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <FileUploadField
+                label="Primary Brand Logo"
+                hint="Upload, replace or remove the official logo (PNG, SVG, JPEG; preview shown)"
+                file={d.logoUrl || d.logo ? { name: `${d.name} logo`, url: d.logoUrl || (d.logo && d.logo.length > 1 ? d.logo : null) } : null}
+                onFileSelect={async (f) => {
+                  if (!isOwner) return;
+                  if (!f) { setD({ ...d, logoAssetId: "", logoUrl: null }); return; }
+                  if (!API_CONFIGURED) { setD({ ...d, logoUrl: f.url }); return; }
+                  try {
+                    const up = await uploadAsset(f, "logo");
+                    setD((cur) => ({ ...cur, logoAssetId: up.assetId, logoUrl: assetUrl(up.assetId) }));
+                  } catch (e) { setSavedMsg(e.message || "Upload failed"); }
+                }}
+              />
+
+              <Field label="Tone & Personality" hint="Comma-separated personality traits">
+                <input
+                  className="inp"
+                  value={(d.voice || []).join(", ")}
+                  disabled={!isOwner}
+                  onChange={(e) => setD({ ...d, voice: list(e.target.value) })}
+                />
+              </Field>
+
+              <Field label="Tone Description">
+                <textarea
+                  className="inp"
+                  rows={2}
+                  value={d.tone || ""}
+                  disabled={!isOwner}
+                  onChange={(e) => setD({ ...d, tone: e.target.value })}
+                />
+              </Field>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* TAB 2: Product Fact Sheets */}
+      {activeTab === "products" && (
+        <section className="panel">
+          <div className="panel-h" style={{ marginBottom: 16 }}>
+            <div>
+              <h2>Products Under {d.name}</h2>
+              <span className="muted small">Each product maintains its own independent fact sheet and specifications</span>
+            </div>
+            {isOwner && (
+              <button
+                className="btn btn-primary sm"
+                onClick={() => {
+                  setEditingProduct({ name: "", previousName: "", specifications: "", approvedClaims: [], restrictedClaims: [], terminology: [] });
+                  setShowProductModal(true);
+                }}
+              >
+                <Icon name="plus" size={14} /> Add Product Fact Sheet
+              </button>
+            )}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
+            {(d.products || []).map((prod) => (
+              <div
+                key={prod.id}
+                style={{
+                  background: "var(--panel2)",
+                  border: "1px solid var(--line)",
+                  borderRadius: 12,
+                  padding: "16px 20px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 17, color: "var(--fg)" }}>{prod.name}</h3>
+                    {prod.previousName && (
+                      <span className="muted small" style={{ color: "var(--warn)" }}>
+                        Formerly known as: <b>{prod.previousName}</b> (disallowed in live copy)
+                      </span>
+                    )}
+                  </div>
+                  {isOwner && (
+                    <button
+                      className="btn sm"
+                      onClick={() => {
+                        setEditingProduct(clone(prod));
+                        setShowProductModal(true);
+                      }}
+                    >
+                      <Icon name="edit" size={13} /> Edit Fact Sheet
+                    </button>
+                  )}
+                </div>
+
+                {prod.imageUrl && <img src={prod.imageUrl} alt={prod.name} style={{ maxHeight: 120, maxWidth: "100%", objectFit: "contain", alignSelf: "flex-start", borderRadius: 8 }} />}
+                {prod.description && <div style={{ fontSize: 13.5 }}>{prod.description}</div>}
+                {(prod.assetList || []).length > 0 && <div className="muted small">Documents: {(prod.assetList || []).map((a) => a.name).join(", ")}</div>}
+                <div style={{ fontSize: 13.5, color: "var(--fg)", lineHeight: 1.5 }}>
+                  <b>Specifications:</b> {prod.specifications || "No specifications listed."}
+                </div>
+
+                {prod.approvedClaims && prod.approvedClaims.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", color: "var(--ok)", marginBottom: 4 }}>
+                      Verified Claims & Evidence ({prod.approvedClaims.length})
+                    </div>
+                    <ul style={{ margin: "0 0 0 16px", padding: 0, fontSize: 13, color: "var(--muted)" }}>
+                      {prod.approvedClaims.map((c, i) => (
+                        <li key={i}><b style={{ color: "var(--fg)" }}>{c.claim}</b> — <i>{c.source}</i></li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {prod.restrictedClaims && prod.restrictedClaims.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", color: "var(--bad)", marginBottom: 4 }}>
+                      Restricted Claims ({prod.restrictedClaims.length})
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {prod.restrictedClaims.map((r, i) => (
+                        <span key={i} style={{ background: "color-mix(in srgb, var(--bad) 12%, transparent)", color: "var(--bad)", padding: "3px 8px", borderRadius: 6, fontSize: 12 }}>
+                          {r}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* TAB 3: Claims & Terminology */}
+      {activeTab === "claims" && (
+        <section className="panel" style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <div className="panel-h">
+            <h2>Approved Claims & Brand Terminology</h2>
+            <span className="muted small">Content is audited against these verified facts</span>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            {/* Approved Claims */}
+            <div style={{ background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 10, padding: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "var(--ok)", marginBottom: 10 }}>
+                Approved Claims (with Citations)
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, display: "flex", flexDirection: "column", gap: 8 }}>
+                {(d.approvedClaims || []).map((c, i) => (
+                  <li key={i}>
+                    <div style={{ fontWeight: 600, color: "var(--fg)" }}>{typeof c === "string" ? c : c.claim}</div>
+                    {typeof c === "object" && c.source && (
+                      <div className="muted small" style={{ fontSize: 11.5 }}>Source: {c.source}</div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Restricted Claims */}
+            <div style={{ background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 10, padding: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "var(--bad)", marginBottom: 10 }}>
+                Restricted / Prohibited Claims
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, display: "flex", flexDirection: "column", gap: 8, color: "var(--bad)" }}>
+                {(d.restrictedClaims || []).map((r, i) => (
+                  <li key={i}>{r}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          {/* Terminology Rules Table */}
+          <div>
+            <h3 style={{ fontSize: 15, marginBottom: 8 }}>Brand Terminology Rules</h3>
+            <div className="table-wrap">
+              <table className="tbl">
+                <thead>
+                  <tr><th>Avoid / Deprecated</th><th>Preferred Term</th><th>Severity</th><th>Guideline Reason</th></tr>
+                </thead>
+                <tbody>
+                  {(d.terminology || []).map((t, i) => (
+                    <tr key={i}>
+                      <td><span style={{ color: "var(--bad)", fontWeight: 600 }}>{t.from}</span></td>
+                      <td><span style={{ color: "var(--ok)", fontWeight: 600 }}>{t.to}</span></td>
+                      <td>
+                        <span style={{ textTransform: "uppercase", fontSize: 11, fontWeight: 700, color: t.strictness === "critical" ? "var(--bad)" : "var(--warn)" }}>
+                          {t.strictness || "warning"}
+                        </span>
+                      </td>
+                      <td className="small">{t.why}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* TAB 4: Visual Identity & Color Palette */}
+      {activeTab === "visuals" && (
+        <section className="panel">
+          <div className="panel-h">
+            <h2>Visual Identity & Colour Palette</h2>
+            <span className="muted small">Interactive color pickers and approved typography</span>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 20 }}>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                <span style={{ fontWeight: 600, fontSize: 13.5 }}>Brand Colour Palette</span>
+                {isOwner && (
+                  <button
+                    className="btn sm"
+                    onClick={() => {
+                      const nextPal = [...(d.palette || []), { name: "New Accent", hex: "#1FAA8C", role: "Accent" }];
+                      setD({ ...d, palette: nextPal });
+                    }}
+                  >
+                    <Icon name="plus" size={13} /> Add Colour
+                  </button>
+                )}
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {(d.palette || []).map((c, i) => (
+                  <ColorPickerField
+                    key={i}
+                    color={c}
+                    onChange={(updated) => {
+                      if (!isOwner) return;
+                      const nextPal = d.palette.map((x, idx) => (idx === i ? updated : x));
+                      setD({ ...d, palette: nextPal });
+                    }}
+                    onRemove={isOwner ? () => {
+                      setD({ ...d, palette: d.palette.filter((_, idx) => idx !== i) });
+                    } : null}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <Field label="Approved Fonts" hint="Official brand typefaces">
+                <input
+                  className="inp"
+                  value={(d.fonts || []).join(", ")}
+                  disabled={!isOwner}
+                  onChange={(e) => setD({ ...d, fonts: list(e.target.value) })}
+                />
+              </Field>
+
+              <AssetList
+                label="Logo variations & other brand assets"
+                items={d.assetList || []} canEdit={isOwner && API_CONFIGURED} upload={uploadAsset} urlFor={assetUrl}
+                kinds={[["logo", "Logo variation"], ["image", "Image"], ["guideline", "Guideline document"], ["other", "Other"]]}
+                onChange={(items) => setD({ ...d, assetList: items })}
+              />
+
+              <Field label="Deprecated / Retired Asset Names" hint="Files flagged if detected">
+                <textarea
+                  className="inp"
+                  rows={2}
+                  value={(d.deprecatedAssets || []).join("\n")}
+                  disabled={!isOwner}
+                  onChange={(e) => setD({ ...d, deprecatedAssets: lines(e.target.value) })}
+                />
+              </Field>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* TAB 5: History */}
+      {activeTab === "history" && (
+        <section className="panel">
+          <div className="panel-h"><h2>Brand Changelog</h2></div>
+          <ol className="timeline">
+            {[...changelog].reverse().map((c) => (
+              <li key={c.version}>
+                <span className="tl-dot" />
+                <div>
+                  <b>Version {c.version}</b> <span className="muted small">· {c.by} · {timeAgo(c.at)}</span>
+                  <p>{c.summary}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+      {/* New Brand Modal */}
+      {showNewBrandModal && (
+        <div className="modal-bg" onClick={() => setShowNewBrandModal(false)}>
+          <div className="modal" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h2 className="serif">Create Independent Brand Profile</h2>
+              <button className="icon-btn" onClick={() => setShowNewBrandModal(false)}><Icon name="x" /></button>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const form = e.target;
+                const name = form.brandName.value.trim();
+                const desc = form.brandDesc.value.trim();
+                if (!name) return;
+                const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+                const newB = {
+                  id,
+                  name,
+                  description: desc,
+                  voice: ["clear", "professional"],
+                  palette: [{ name: "Brand Primary", hex: "var(--accent)", role: "Primary" }],
+                  fonts: ["Inter"],
+                  approvedClaims: [],
+                  restrictedClaims: [],
+                  terminology: [],
+                  products: [],
+                  version: 1,
+                  updatedAt: new Date().toISOString(),
+                };
+                dispatch({ type: "createBrand", brand: newB });
+                setD(newB);
+                setShowNewBrandModal(false);
+              }}
+              style={{ display: "flex", flexDirection: "column", gap: 14 }}
+            >
+              <Field label="Brand Name">
+                <input name="brandName" className="inp" placeholder="e.g. Acme, McLaren, Patagonia" required autoFocus />
+              </Field>
+              <Field label="Brand Description">
+                <textarea name="brandDesc" className="inp" rows={3} placeholder="Brief summary of brand mission..." />
+              </Field>
+              <div className="modal-actions">
+                <button type="submit" className="btn btn-primary" style={{ width: "100%", justifyContent: "center" }}>
+                  Create Brand Profile
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Product Fact Sheet Modal */}
+      {showProductModal && editingProduct && (
+        <div className="modal-bg" onClick={() => setShowProductModal(false)}>
+          <div className="modal" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h2 className="serif">{editingProduct.id ? "Edit Product Fact Sheet" : "Add Product Fact Sheet"}</h2>
+              <button className="icon-btn" onClick={() => setShowProductModal(false)}><Icon name="x" /></button>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleAddProduct(editingProduct);
+              }}
+              style={{ display: "flex", flexDirection: "column", gap: 12 }}
+            >
+              <Field label="Product Name">
+                <input
+                  className="inp"
+                  value={editingProduct.name}
+                  onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
+                  required
+                />
+              </Field>
+              <Field label="Previous Name (if rebranded)" hint="Flagged as outdated in review">
+                <input
+                  className="inp"
+                  value={editingProduct.previousName || ""}
+                  placeholder="e.g. Alpha Hydro, Dino"
+                  onChange={(e) => setEditingProduct({ ...editingProduct, previousName: e.target.value })}
+                />
+              </Field>
+              <Field label="Specifications & Specs">
+                <textarea
+                  className="inp"
+                  rows={3}
+                  value={editingProduct.specifications || ""}
+                  placeholder="Dimensions, battery life, materials, engine output..."
+                  onChange={(e) => setEditingProduct({ ...editingProduct, specifications: e.target.value })}
+                />
+              </Field>
+              <Field label="Product Description">
+                <textarea className="inp" rows={2} value={editingProduct.description || ""} onChange={(e) => setEditingProduct({ ...editingProduct, description: e.target.value })} />
+              </Field>
+              <Field label="Notes" hint="Internal context for reviewers">
+                <textarea className="inp" rows={2} value={editingProduct.notes || ""} onChange={(e) => setEditingProduct({ ...editingProduct, notes: e.target.value })} />
+              </Field>
+              <FileUploadField
+                label="Product Image"
+                hint="Shown on the product fact sheet"
+                file={editingProduct.imageUrl ? { name: `${editingProduct.name || "Product"} image`, url: editingProduct.imageUrl } : null}
+                onFileSelect={async (f) => {
+                  if (!f) { setEditingProduct({ ...editingProduct, imageAssetId: "", imageUrl: null }); return; }
+                  if (!API_CONFIGURED) return;
+                  try { const up = await uploadAsset(f, "image"); setEditingProduct((cur) => ({ ...cur, imageAssetId: up.assetId, imageUrl: assetUrl(up.assetId) })); }
+                  catch (e) { setSavedMsg(e.message || "Upload failed"); }
+                }}
+              />
+              <AssetList
+                label="Supporting documents & images"
+                items={editingProduct.assetList || []} canEdit={API_CONFIGURED} upload={uploadAsset} urlFor={assetUrl}
+                kinds={[["guideline", "Supporting document"], ["image", "Image"], ["other", "Other"]]}
+                onChange={(items) => setEditingProduct({ ...editingProduct, assetList: items })}
+              />
+              <div className="modal-actions">
+                <button type="submit" className="btn btn-primary" style={{ width: "100%", justifyContent: "center" }}>
+                  Save Product Fact Sheet
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Creator Suggestion Modal */}
+      {showSuggestModal && (
+        <div className="modal-bg" onClick={() => setShowSuggestModal(false)}>
+          <div className="modal" style={{ maxWidth: 500 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <div>
+                <div className="eyebrow-s">Creator Collaboration</div>
+                <h2 className="serif">Suggest Brand Fact Sheet Changes</h2>
+              </div>
+              <button className="icon-btn" onClick={() => setShowSuggestModal(false)}><Icon name="x" /></button>
+            </div>
+            <form onSubmit={handleSuggest} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <p className="muted small" style={{ margin: 0 }}>
+                Creators cannot alter official brand guidelines directly. Your proposed updates will be routed to the <b>Brand Owner</b> for review.
+              </p>
+              <Field label="Proposed Rule, Specification, or Claim Update">
+                <textarea
+                  className="inp"
+                  rows={5}
+                  placeholder="Describe the requested change, e.g. 'Add new 2026 certification evidence to the Smart Bottle claims'..."
+                  value={suggestionText}
+                  onChange={(e) => setSuggestionText(e.target.value)}
+                  required
+                />
+              </Field>
+              <div className="modal-actions">
+                <button type="submit" className="btn btn-primary" style={{ width: "100%", justifyContent: "center" }}>
+                  Submit Suggestion to Owner
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* AI Fact-Sheet Assistant Drawer/Modal */}
+      {showAssistant && (
+        <FactSheetAssistant
+          brandName={d.name}
+          onClose={() => setShowAssistant(false)}
+          onApply={(draft) => {
+            handleAddProduct(draft);
+          }}
+        />
+      )}
     </div>
   );
 }

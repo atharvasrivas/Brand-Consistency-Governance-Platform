@@ -10,7 +10,7 @@ export default function FindingCard({ f, selected, onSelect, act, readOnly }) {
   const [reason, setReason] = useState("");
   const [alt, setAlt] = useState("");
   const open = f.status === "open";
-  const mandatory = f.strictness === "mandatory";
+  const mandatory = f.strictness === "mandatory" || f.strictness === "critical";
   const canAct = open && !readOnly && act;
 
   const reject = () => {
@@ -20,7 +20,7 @@ export default function FindingCard({ f, selected, onSelect, act, readOnly }) {
   };
 
   return (
-    <article id={`f-${f.id}`} className={`fcard st-${f.status} ${selected ? "sel" : ""}`} style={{ "--cat": CATEGORY_COLOR[f.category] || "#8E7CFF" }} onClick={onSelect}>
+    <article id={`f-${f.id}`} className={`fcard st-${f.status} ${selected ? "sel" : ""}`} style={{ "--cat": CATEGORY_COLOR[f.category] || "var(--accent)" }} onClick={onSelect}>
       <header className="fc-head">
         <span className="fc-dot" />
         <b className="fc-title">{f.label}</b>
@@ -74,7 +74,7 @@ export default function FindingCard({ f, selected, onSelect, act, readOnly }) {
           ) : f.fix && f.fix.type === "alt" ? (
             <>
               <input className="input grow" value={alt} onChange={(e) => setAlt(e.target.value)} placeholder="Describe the image in one sentence" aria-label="Alt text" />
-              <button className="btn btn-primary sm" disabled={!alt.trim()} onClick={() => act.setAlt(alt.trim())}>Save alt text</button>
+              <button className="btn btn-primary sm" disabled={!alt.trim()} onClick={() => act.setAlt(f, alt.trim())}>Save alt text</button>
               <button className="btn sm" onClick={() => setMode("reject")}>Reject</button>
             </>
           ) : (
