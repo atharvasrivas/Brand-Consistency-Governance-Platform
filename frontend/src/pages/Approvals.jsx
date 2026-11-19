@@ -5,11 +5,12 @@ import { Avatar, Empty, PageHead, Pill, StatusPill, Tabs } from "../components/u
 import { useStore } from "../store.jsx";
 import { recheck as recheckSubmission } from "../api.js";
 import { CONTENT_TYPES } from "../engine/seed.js";
-import { diffWords, getQuery, navigate, timeAgo } from "../util.js";
+import { STATUS } from "../util.js";
+import { PENDING, diffWords, getQuery, navigate, timeAgo } from "../util.js";
 
 const FILTERS = [
   { id: "all", label: "All" },
-  { id: "in_review", label: "In review" },
+  { id: "pending", label: "Pending review" },
   { id: "changes_requested", label: "Changes requested" },
   { id: "approved", label: "Approved" },
   { id: "rejected", label: "Rejected" },
@@ -41,7 +42,8 @@ function Detail({ s }) {
   const routed = (s.findings || []).filter((f) => f.status === "open" && f.needsHuman);
   const stale = s.profileVersion < (brand?.version || 1);
   const isDecider = role === "reviewer" || role === "owner" || role === "manager";
-  const pending = s.status === "in_review";
+  const pending = PENDING.includes(s.status);
+  const canStart = ["submitted", "resubmitted"].includes(s.status);
   const currentUserName = state.user?.name || "Reviewer";
   const isAuthor = s.author === currentUserName;
   // Non-negotiable rule: author cannot decide their own submission
@@ -179,7 +181,7 @@ function Detail({ s }) {
           {(s.comments || []).map((c, i) => (
             <div key={i} style={{ background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 8, padding: "10px 14px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                <span style={{ fontWeight: 600, fontSize: 13 }}>{c.by} <span className="muted small">({c.role})</span></span>
+                <span style={{ fontWeight: 600, fontSize: 13 }}>{c.by} <span className="muted small">({c.role}){c.version ? ` · on version ${c.version}` : ""}</span></span>
                 <span className="muted small">{timeAgo(c.at)}</span>
               </div>
               <p style={{ margin: 0, fontSize: 13.5, color: "var(--fg)" }}>{c.text}</p>
@@ -209,6 +211,17 @@ function Detail({ s }) {
 
       {tab === "history" && (
         <ol className="timeline">
+          {(s.decisions || []).length > 0 && (
+            <li>
+              <span className="tl-dot" />
+              <div>
+                <b>Decisions</b>
+                {s.decisions.map((d) => (
+                  <p key={d.n} className="small">#{d.n} · {STATUS[d.status]?.label || d.status} by {d.by} ({d.role}) on version {d.version} · {new Date(d.at).toLocaleString()}{d.comment ? ` — “${d.comment}”` : ""}</p>
+                ))}
+              </div>
+            </li>
+          )}
           {[...(s.activity || [])].reverse().map((act, i) => (
             <li key={i}>
               <span className="tl-dot" />
@@ -239,6 +252,11 @@ function Detail({ s }) {
             value={comment}
             onChange={(e) => setComment(e.target.value)}
           />
+          {canStart && canDecide && (
+            <button className="btn" onClick={() => dispatch({ type: "startReview", id: s.id })}>
+              <Icon name="search" size={16} /> Start review
+            </button>
+          )}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <button
               className="btn btn-primary"
@@ -281,7 +299,7 @@ export default function Approvals() {
 
   const filteredSubs = useMemo(() => {
     return submissions.filter((s) => {
-      const matchStatus = filter === "all" || s.status === filter;
+      const matchStatus = filter === "all" || (filter === "pending" ? PENDING.includes(s.status) : s.status === filter);
       const matchBrand = brandFilter === "all" || s.brandId === brandFilter;
       return matchStatus && matchBrand;
     });
@@ -297,7 +315,7 @@ export default function Approvals() {
             className={`tab ${topTab === "submissions" ? "on" : ""}`}
             onClick={() => setTopTab("submissions")}
           >
-            Submissions ({submissions.filter((s) => s.status === "in_review").length} pending)
+            Submissions ({submissions.filter((s) => PENDING.includes(s.status)).length} pending)
           </button>
           <button
             className={`tab ${topTab === "suggestions" ? "on" : ""}`}

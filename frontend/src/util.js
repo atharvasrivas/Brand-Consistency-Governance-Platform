@@ -1,9 +1,16 @@
 export const STATUS = {
+  draft: { label: "Draft", cls: "st-draft" },
+  submitted: { label: "Submitted", cls: "st-review" },
+  under_review: { label: "Under review", cls: "st-review" },
+  resubmitted: { label: "Resubmitted", cls: "st-review" },
   in_review: { label: "In review", cls: "st-review" },
   changes_requested: { label: "Changes requested", cls: "st-changes" },
   approved: { label: "Approved", cls: "st-approved" },
   rejected: { label: "Rejected", cls: "st-rejected" },
 };
+
+// Statuses that are waiting for a reviewer.
+export const PENDING = ["submitted", "under_review", "resubmitted", "in_review"];
 
 export const CATEGORY_COLOR = {
   "Facts & claims": "#F5B84B",

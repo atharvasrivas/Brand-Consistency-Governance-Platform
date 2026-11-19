@@ -223,7 +223,33 @@ export default function Review() {
     }
   }
 
+  async function saveDraft() {
+    const title = meta.title.trim() || `${meta.type.toUpperCase()}: ${content.slice(0, 30)}…`;
+    const res = await dispatch({
+      type: "submit", draft: true,
+      submission: { title, brandId: activeBrand.id, productId: activeProduct ? activeProduct.id : null, type: meta.type, audience: meta.audience, purpose: meta.purpose,
+        image, findings, versions: [{ n: 1, content }], comments: [] },
+    });
+    if (res) { setToast("Draft saved. Find it under My Submissions."); }
+  }
+
+  async function resubmitRevision() {
+    if (blocking.length > 0) {
+      alert("Please fix open critical/mandatory findings before resubmitting.");
+      return;
+    }
+    const res = await dispatch({
+      type: "resubmit", id: editing.id, content, findings, note: note || "Revised after feedback",
+      fields: { title: meta.title, type: meta.type, audience: meta.audience, purpose: meta.purpose },
+    });
+    if (res) {
+      dispatch({ type: "edit", id: null });
+      navigate("/mine");
+    }
+  }
+
   async function submitForReview() {
+    if (editing) return resubmitRevision();
     if (blocking.length > 0) {
       alert("Please fix open critical/mandatory findings or provide a written override reason before submitting.");
       return;
@@ -250,8 +276,7 @@ export default function Review() {
       },
     });
     if (res) {
-      alert(`Submission created successfully! Routed to Reviewer inbox under ${activeBrand.name}.`);
-      navigate("/approvals");
+      navigate(role === "owner" ? "/approvals" : "/mine");
     }
   }
 
@@ -475,8 +500,13 @@ export default function Review() {
               disabled={busy || !content.trim() || blocking.length > 0}
               onClick={submitForReview}
             >
-              <Icon name="check" size={16} /> Submit for Approval
+              <Icon name="check" size={16} /> {editing ? `Resubmit as version ${editing.versions.length + 1}` : "Submit for Approval"}
             </button>
+            {!editing && (
+              <button type="button" className="btn" disabled={busy || !content.trim()} onClick={saveDraft}>
+                Save draft
+              </button>
+            )}
           </div>
         </div>
       </div>

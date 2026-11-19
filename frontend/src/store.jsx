@@ -269,6 +269,7 @@ async function remoteAction(a, state) {
         note: s.comments[0] && s.comments[0].text,
         brandId: s.brandId || state.activeBrandId,
         productId: s.productId || state.activeProductId,
+        draft: !!a.draft,
       };
       const { submission } = await apiFetch("POST", "/api/submissions", body);
       return { actions: [{ type: "replaceSubmission", submission: fromSrvSubmission(submission) }], result: { id: submission.id } };
@@ -276,6 +277,14 @@ async function remoteAction(a, state) {
     case "resubmit": {
       const body = { ...a.fields, content: a.content, findings: a.findings, note: a.note };
       const { submission } = await apiFetch("POST", `/api/submissions/${a.id}/versions`, body);
+      return { actions: [{ type: "replaceSubmission", submission: fromSrvSubmission(submission) }], result: { id: submission.id } };
+    }
+    case "startReview": {
+      const { submission } = await apiFetch("POST", `/api/submissions/${a.id}/start-review`);
+      return { actions: [{ type: "replaceSubmission", submission: fromSrvSubmission(submission) }], result: { id: submission.id } };
+    }
+    case "submitDraft": {
+      const { submission } = await apiFetch("POST", `/api/submissions/${a.id}/submit`, { content: a.content, findings: a.findings });
       return { actions: [{ type: "replaceSubmission", submission: fromSrvSubmission(submission) }], result: { id: submission.id } };
     }
     case "decide": {
@@ -378,7 +387,7 @@ export function StoreProvider({ children }) {
 
   async function dispatch(a) {
     const s = ref.current;
-    if (!s.remote || !["submit", "resubmit", "decide", "comment", "recheck", "profile", "saveBrand", "createBrand", "saveProduct", "suggestProfile", "decideSuggestion", "loadDemo"].includes(a.type)) {
+    if (!s.remote || !["submit", "resubmit", "startReview", "submitDraft", "decide", "comment", "recheck", "profile", "saveBrand", "createBrand", "saveProduct", "suggestProfile", "decideSuggestion", "loadDemo"].includes(a.type)) {
       const result = a.type === "submit" ? { id: `S-${s.nextId}` } : {};
       rawDispatch(a);
       return result;
