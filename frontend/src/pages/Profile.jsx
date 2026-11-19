@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from "react";
 import Icon from "../components/Icon.jsx";
-import { Field, PageHead, Pill, ColorPickerField, FileUploadField } from "../components/ui.jsx";
+import { Field, PageHead, Pill, ColorPickerField, FileUploadField, AssetList } from "../components/ui.jsx";
 import FactSheetAssistant from "../components/FactSheetAssistant.jsx";
 import { useStore } from "../store.jsx";
 import { findConflicts } from "../engine/checker.js";
 import { timeAgo } from "../util.js";
+import { assetUrl, uploadAsset, API_CONFIGURED } from "../api.js";
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const list = (s) => (s || "").split(",").map((x) => x.trim()).filter(Boolean);
@@ -127,7 +128,7 @@ export default function Profile() {
 
       {/* Permissions Notification for Creator/Reviewer */}
       {!isOwner && (
-        <div style={{ background: "rgba(91, 76, 224, 0.08)", border: "1px solid rgba(91, 76, 224, 0.25)", borderRadius: 10, padding: "10px 16px", marginBottom: 18, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ background: "color-mix(in srgb, var(--accent) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--accent) 25%, transparent)", borderRadius: 10, padding: "10px 16px", marginBottom: 18, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ fontSize: 13 }}>
             <Icon name="shield" size={15} style={{ color: "var(--accent)", marginRight: 8, verticalAlign: "middle" }} />
             <b>{role === "creator" ? "Creator Perspective" : "Reviewer Perspective"}:</b> Only Brand Owners can publish official edits. You can view all approved rules, specs, and claims.
@@ -147,9 +148,6 @@ export default function Profile() {
         </button>
         <button className={`tab ${activeTab === "products" ? "on" : ""}`} onClick={() => setActiveTab("products")}>
           Product Fact Sheets ({d.products?.length || 0})
-        </button>
-        <button className={`tab ${activeTab === "claims" ? "on" : ""}`} onClick={() => setActiveTab("claims")}>
-          Claims & Terminology
         </button>
         <button className={`tab ${activeTab === "visuals" ? "on" : ""}`} onClick={() => setActiveTab("visuals")}>
           Visual Identity & Palette
@@ -188,6 +186,25 @@ export default function Profile() {
                 />
               </Field>
 
+              <Field label="Tagline">
+                <input className="inp" value={d.tagline || ""} disabled={!isOwner} onChange={(e) => setD({ ...d, tagline: e.target.value })} />
+              </Field>
+              <Field label="Industry">
+                <input className="inp" value={d.industry || ""} disabled={!isOwner} onChange={(e) => setD({ ...d, industry: e.target.value })} />
+              </Field>
+              <Field label="Brand History" hint="Milestones and timeline">
+                <textarea className="inp" rows={3} value={d.history || ""} disabled={!isOwner} onChange={(e) => setD({ ...d, history: e.target.value })} />
+              </Field>
+              <Field label="Brand Values" hint="Comma-separated">
+                <input className="inp" value={d.valuesText || ""} disabled={!isOwner} onChange={(e) => setD({ ...d, valuesText: e.target.value })} />
+              </Field>
+              <Field label="Target Audience">
+                <textarea className="inp" rows={2} value={d.targetAudience || ""} disabled={!isOwner} onChange={(e) => setD({ ...d, targetAudience: e.target.value })} />
+              </Field>
+              <Field label="Brand Voice" hint="How the brand speaks">
+                <textarea className="inp" rows={2} value={d.voiceText || ""} disabled={!isOwner} onChange={(e) => setD({ ...d, voiceText: e.target.value })} />
+              </Field>
+
               <Field label="Heritage & Origin" hint="Founding story, country of origin, and heritage">
                 <textarea
                   className="inp"
@@ -202,9 +219,17 @@ export default function Profile() {
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <FileUploadField
                 label="Primary Brand Logo"
-                hint="Upload official vector (.svg) or high-res logo"
-                file={d.logo ? { name: `${d.name}-Logo.svg`, url: d.logo } : null}
-                onFileSelect={(f) => isOwner && setD({ ...d, logo: f ? f.url : null })}
+                hint="Upload, replace or remove the official logo (PNG, SVG, JPEG; preview shown)"
+                file={d.logoUrl || d.logo ? { name: `${d.name} logo`, url: d.logoUrl || (d.logo && d.logo.length > 1 ? d.logo : null) } : null}
+                onFileSelect={async (f) => {
+                  if (!isOwner) return;
+                  if (!f) { setD({ ...d, logoAssetId: "", logoUrl: null }); return; }
+                  if (!API_CONFIGURED) { setD({ ...d, logoUrl: f.url }); return; }
+                  try {
+                    const up = await uploadAsset(f, "logo");
+                    setD((cur) => ({ ...cur, logoAssetId: up.assetId, logoUrl: assetUrl(up.assetId) }));
+                  } catch (e) { setSavedMsg(e.message || "Upload failed"); }
+                }}
               />
 
               <Field label="Tone & Personality" hint="Comma-separated personality traits">
@@ -287,6 +312,9 @@ export default function Profile() {
                   )}
                 </div>
 
+                {prod.imageUrl && <img src={prod.imageUrl} alt={prod.name} style={{ maxHeight: 120, maxWidth: "100%", objectFit: "contain", alignSelf: "flex-start", borderRadius: 8 }} />}
+                {prod.description && <div style={{ fontSize: 13.5 }}>{prod.description}</div>}
+                {(prod.assetList || []).length > 0 && <div className="muted small">Documents: {(prod.assetList || []).map((a) => a.name).join(", ")}</div>}
                 <div style={{ fontSize: 13.5, color: "var(--fg)", lineHeight: 1.5 }}>
                   <b>Specifications:</b> {prod.specifications || "No specifications listed."}
                 </div>
@@ -306,12 +334,12 @@ export default function Profile() {
 
                 {prod.restrictedClaims && prod.restrictedClaims.length > 0 && (
                   <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", color: "#FF6B5E", marginBottom: 4 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", color: "var(--bad)", marginBottom: 4 }}>
                       Restricted Claims ({prod.restrictedClaims.length})
                     </div>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       {prod.restrictedClaims.map((r, i) => (
-                        <span key={i} style={{ background: "rgba(255, 107, 94, 0.12)", color: "#FF6B5E", padding: "3px 8px", borderRadius: 6, fontSize: 12 }}>
+                        <span key={i} style={{ background: "color-mix(in srgb, var(--bad) 12%, transparent)", color: "var(--bad)", padding: "3px 8px", borderRadius: 6, fontSize: 12 }}>
                           {r}
                         </span>
                       ))}
@@ -352,10 +380,10 @@ export default function Profile() {
 
             {/* Restricted Claims */}
             <div style={{ background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 10, padding: 14 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: "#FF6B5E", marginBottom: 10 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "var(--bad)", marginBottom: 10 }}>
                 Restricted / Prohibited Claims
               </div>
-              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, display: "flex", flexDirection: "column", gap: 8, color: "#FF6B5E" }}>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, display: "flex", flexDirection: "column", gap: 8, color: "var(--bad)" }}>
                 {(d.restrictedClaims || []).map((r, i) => (
                   <li key={i}>{r}</li>
                 ))}
@@ -374,10 +402,10 @@ export default function Profile() {
                 <tbody>
                   {(d.terminology || []).map((t, i) => (
                     <tr key={i}>
-                      <td><span style={{ color: "#FF6B5E", fontWeight: 600 }}>{t.from}</span></td>
+                      <td><span style={{ color: "var(--bad)", fontWeight: 600 }}>{t.from}</span></td>
                       <td><span style={{ color: "var(--ok)", fontWeight: 600 }}>{t.to}</span></td>
                       <td>
-                        <span style={{ textTransform: "uppercase", fontSize: 11, fontWeight: 700, color: t.strictness === "critical" ? "#FF6B5E" : "var(--warn)" }}>
+                        <span style={{ textTransform: "uppercase", fontSize: 11, fontWeight: 700, color: t.strictness === "critical" ? "var(--bad)" : "var(--warn)" }}>
                           {t.strictness || "warning"}
                         </span>
                       </td>
@@ -444,15 +472,12 @@ export default function Profile() {
                 />
               </Field>
 
-              <Field label="Approved Visual Assets" hint="Asset references">
-                <textarea
-                  className="inp"
-                  rows={3}
-                  value={(d.approvedAssets || []).join("\n")}
-                  disabled={!isOwner}
-                  onChange={(e) => setD({ ...d, approvedAssets: lines(e.target.value) })}
-                />
-              </Field>
+              <AssetList
+                label="Logo variations & other brand assets"
+                items={d.assetList || []} canEdit={isOwner && API_CONFIGURED} upload={uploadAsset} urlFor={assetUrl}
+                kinds={[["logo", "Logo variation"], ["image", "Image"], ["guideline", "Guideline document"], ["other", "Other"]]}
+                onChange={(items) => setD({ ...d, assetList: items })}
+              />
 
               <Field label="Deprecated / Retired Asset Names" hint="Files flagged if detected">
                 <textarea
@@ -507,7 +532,7 @@ export default function Profile() {
                   name,
                   description: desc,
                   voice: ["clear", "professional"],
-                  palette: [{ name: "Brand Primary", hex: "#5B4CE0", role: "Primary" }],
+                  palette: [{ name: "Brand Primary", hex: "var(--accent)", role: "Primary" }],
                   fonts: ["Inter"],
                   approvedClaims: [],
                   restrictedClaims: [],
@@ -578,6 +603,29 @@ export default function Profile() {
                   onChange={(e) => setEditingProduct({ ...editingProduct, specifications: e.target.value })}
                 />
               </Field>
+              <Field label="Product Description">
+                <textarea className="inp" rows={2} value={editingProduct.description || ""} onChange={(e) => setEditingProduct({ ...editingProduct, description: e.target.value })} />
+              </Field>
+              <Field label="Notes" hint="Internal context for reviewers">
+                <textarea className="inp" rows={2} value={editingProduct.notes || ""} onChange={(e) => setEditingProduct({ ...editingProduct, notes: e.target.value })} />
+              </Field>
+              <FileUploadField
+                label="Product Image"
+                hint="Shown on the product fact sheet"
+                file={editingProduct.imageUrl ? { name: `${editingProduct.name || "Product"} image`, url: editingProduct.imageUrl } : null}
+                onFileSelect={async (f) => {
+                  if (!f) { setEditingProduct({ ...editingProduct, imageAssetId: "", imageUrl: null }); return; }
+                  if (!API_CONFIGURED) return;
+                  try { const up = await uploadAsset(f, "image"); setEditingProduct((cur) => ({ ...cur, imageAssetId: up.assetId, imageUrl: assetUrl(up.assetId) })); }
+                  catch (e) { setSavedMsg(e.message || "Upload failed"); }
+                }}
+              />
+              <AssetList
+                label="Supporting documents & images"
+                items={editingProduct.assetList || []} canEdit={API_CONFIGURED} upload={uploadAsset} urlFor={assetUrl}
+                kinds={[["guideline", "Supporting document"], ["image", "Image"], ["other", "Other"]]}
+                onChange={(items) => setEditingProduct({ ...editingProduct, assetList: items })}
+              />
               <div className="modal-actions">
                 <button type="submit" className="btn btn-primary" style={{ width: "100%", justifyContent: "center" }}>
                   Save Product Fact Sheet

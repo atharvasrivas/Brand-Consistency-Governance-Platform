@@ -231,6 +231,14 @@ function Detail({ s }) {
             </label>
           )}
 
+          <textarea
+            className="inp"
+            rows={2}
+            placeholder="Decision note (required to request changes or reject)"
+            aria-label="Decision note"
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+          />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <button
               className="btn btn-primary"
@@ -249,7 +257,7 @@ function Detail({ s }) {
             <button
               className="btn"
               disabled={!canDecide}
-              style={{ color: "#FF6B5E" }}
+              style={{ color: "var(--bad)" }}
               onClick={() => decide("rejected")}
             >
               <Icon name="x" size={16} /> Reject
@@ -416,7 +424,7 @@ export default function Approvals() {
                     <StatusPill status={sug.status === "pending" ? "in_review" : sug.status} />
                   </div>
 
-                  <p style={{ margin: 0, fontSize: 13.5, color: "var(--fg)", background: "rgba(255,255,255,0.03)", padding: 10, borderRadius: 6 }}>
+                  <p style={{ margin: 0, fontSize: 13.5, color: "var(--fg)", background: "color-mix(in srgb, var(--text) 4%, transparent)", padding: 10, borderRadius: 6 }}>
                     "{sug.proposed}"
                   </p>
 
@@ -435,7 +443,7 @@ export default function Approvals() {
                         </button>
                         <button
                           className="btn sm"
-                          style={{ color: "#FF6B5E" }}
+                          style={{ color: "var(--bad)" }}
                           onClick={() => dispatch({ type: "decideSuggestion", id: sug.id, status: "rejected" })}
                         >
                           <Icon name="x" size={14} /> Reject

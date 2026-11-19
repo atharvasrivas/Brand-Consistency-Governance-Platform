@@ -5,6 +5,8 @@ import Approvals from "./pages/Approvals.jsx";
 import Profile from "./pages/Profile.jsx";
 import Insights from "./pages/Insights.jsx";
 import Responsible from "./pages/Responsible.jsx";
+import Governance from "./pages/Governance.jsx";
+import Rules from "./pages/Rules.jsx";
 import Icon from "./components/Icon.jsx";
 import OnboardingModal from "./components/OnboardingModal.jsx";
 import { useStore } from "./store.jsx";
@@ -12,11 +14,32 @@ import { ROLES } from "./engine/seed.js";
 import { navigate } from "./util.js";
 
 const ALL_NAV = [
-  { path: "/review", label: "Review Studio", icon: "search", roles: ["creator", "reviewer", "owner", "manager"] },
-  { path: "/approvals", label: "Approvals", icon: "check", roles: ["reviewer", "owner", "manager"] },
-  { path: "/profile", label: "Brand Profile", icon: "book", roles: ["creator", "reviewer", "owner", "manager"] },
-  { path: "/insights", label: "Insights", icon: "chart", roles: ["reviewer", "owner", "manager"] },
+  { path: "/review", label: "Brand Review", icon: "search", roles: ["creator", "reviewer", "owner"] },
+  { path: "/approvals", label: "Approvals", icon: "check", roles: ["reviewer", "owner"] },
+  { path: "/insights", label: "Insights", icon: "chart", roles: ["reviewer", "owner"] },
+  { path: "/governance", label: "Governance", icon: "shield", roles: ["reviewer", "owner"] },
+  { path: "/profile", label: "Brand Profile", icon: "book", roles: ["reviewer", "owner"] },
+  { path: "/rules", label: "Rules & Knowledge", icon: "book", roles: ["reviewer", "owner"] },
 ];
+
+function ThemeSwitch() {
+  const [theme, setTheme] = useState(() => document.documentElement.dataset.theme || "lime");
+  const pick = (t) => {
+    setTheme(t);
+    document.documentElement.dataset.theme = t;
+    try { localStorage.setItem("bgp.theme", t); } catch { /* preference simply is not remembered */ }
+  };
+  return (
+    <div className="theme-switch" role="group" aria-label="Colour theme">
+      <button className={theme === "lime" ? "on" : ""} onClick={() => pick("lime")} aria-pressed={theme === "lime"} title="Midnight Lime">
+        <span className="theme-dot" style={{ background: "var(--swatch-lime)" }} /> Lime
+      </button>
+      <button className={theme === "coral" ? "on" : ""} onClick={() => pick("coral")} aria-pressed={theme === "coral"} title="Navy & Coral">
+        <span className="theme-dot" style={{ background: "var(--swatch-coral)" }} /> Coral
+      </button>
+    </div>
+  );
+}
 
 function useRoute() {
   const get = () => (window.location.hash.replace(/^#/, "") || "/").split("?")[0];
@@ -42,7 +65,7 @@ function Shell({ route, children, onEditUser }) {
       <header className="topbar">
         <button className="brand" onClick={() => navigate("/")} aria-label="Home">
           <span className="logo"><Icon name="shield" size={18} /></span>
-          <span><b>CodeBlooded</b><small>Brand Governance</small></span>
+          <span><b>Brand Governance</b><small>Platform</small></span>
         </button>
 
         <nav className="nav" aria-label="Main">
@@ -66,6 +89,7 @@ function Shell({ route, children, onEditUser }) {
             {state.remote ? "API connected" : "Local engine"}
           </span>
 
+          <ThemeSwitch />
           {/* Active Brand Badge */}
           <button
             className="btn"
@@ -74,36 +98,23 @@ function Shell({ route, children, onEditUser }) {
             title="Active Brand context (click to configure in Brand Profile)"
           >
             <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--accent)" }} />
-            <span>Brand: <b>{state.profile?.name || "Nova"}</b></span>
+            <span>Brand: <b>{state.profile?.name || "None"}</b></span>
           </button>
 
           {/* Active User Identity & Role Switcher */}
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <button
               className="btn"
-              style={{ height: 32, fontSize: 12.5, padding: "0 12px", background: "rgba(91, 76, 224, 0.12)", border: "1px solid rgba(91, 76, 224, 0.3)", color: "var(--fg)" }}
+              style={{ height: 32, fontSize: 12.5, padding: "0 12px", background: "color-mix(in srgb, var(--accent) 12%, transparent)", border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)", color: "var(--fg)" }}
               onClick={onEditUser}
               title="Click to update identity or switch role"
             >
               <span style={{ textTransform: "capitalize", fontWeight: 700, color: "var(--accent)", marginRight: 4 }}>
-                {currentRole === "owner" || currentRole === "manager" ? "Owner" : currentRole}
+                {currentRole === "owner" ? "Brand Owner" : currentRole}
               </span>
               · {state.user?.name || "Set Identity"}
             </button>
 
-            {/* Quick Role Tester */}
-            <select
-              value={currentRole === "manager" ? "owner" : currentRole}
-              onChange={(e) => dispatch({ type: "role", role: e.target.value })}
-              className="inp"
-              style={{ height: 32, fontSize: 12, width: "auto", padding: "0 8px" }}
-              aria-label="Quick Switch Role"
-              title="Quick switch role for testing permissions"
-            >
-              <option value="creator">Role: Creator</option>
-              <option value="reviewer">Role: Reviewer</option>
-              <option value="owner">Role: Owner</option>
-            </select>
           </div>
         </div>
       </header>
@@ -168,17 +179,19 @@ function EmptyWorkspace({ role, dispatch }) {
   );
 }
 
+const roleLabel = (r) => (r === "owner" ? "Brand Owner" : r.charAt(0).toUpperCase() + r.slice(1));
+
 function AccessDenied({ role, needed = "Reviewer or Owner" }) {
   return (
     <div style={{ maxWidth: 600, margin: "60px auto", textAlign: "center", background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 16, padding: "40px 24px" }}>
       <Icon name="shield" size={40} style={{ color: "var(--warn)", marginBottom: 14 }} />
       <h2 className="serif" style={{ marginBottom: 8 }}>Access Restricted for {role} Role</h2>
       <p style={{ color: "var(--muted)", fontSize: 14, lineHeight: 1.6, marginBottom: 20 }}>
-        This section is reserved for <b>{needed}</b> roles according to the governance access matrix. Creators can review content and propose fact sheet suggestions.
+        This section is reserved for <b>{needed}</b> roles according to the governance access matrix. Your role can use Brand Review.
       </p>
       <div style={{ display: "flex", justifyContent: "center", gap: 12 }}>
         <button className="btn btn-primary" onClick={() => navigate("/review")}>
-          Go to Review Studio
+          Go to Brand Review
         </button>
       </div>
     </div>
@@ -196,26 +209,33 @@ export default function App() {
   // Force onboarding modal on first visit if user hasn't set their name
   const needsOnboarding = !user.onboarded || !user.name;
 
+  const modal = (needsOnboarding || showOnboarding) && (
+    <OnboardingModal
+      initialUser={user}
+      isEdit={user.onboarded && showOnboarding}
+      onClose={() => setShowOnboarding(false)}
+      onSave={(u) => {
+        dispatch({ type: "setUserIdentity", user: u });
+        setShowOnboarding(false);
+      }}
+    />
+  );
+
   if (!state.ready) return <div className="boot" role="status">Connecting to brand governance engine…</div>;
 
-  if (state.remote && state.brands.length === 0 && route !== "/" && route !== "/responsible") {
-    return <Shell route={route} onEditUser={() => setShowOnboarding(true)}><EmptyWorkspace role={currentRole} dispatch={dispatch} /></Shell>;
+  if (state.brands.length === 0 && route !== "/" && route !== "/responsible") {
+    return <><Shell route={route} onEditUser={() => setShowOnboarding(true)}><EmptyWorkspace role={currentRole} dispatch={dispatch} /></Shell>{modal}</>;
   }
 
   const renderRoute = () => {
     if (route === "/" || route === "") return <Landing />;
-    if (route === "/review") return <Review />;
-    if (route === "/approvals") {
-      if (currentRole === "creator") return <AccessDenied role="Creator" needed="Reviewer or Owner" />;
-      return <Approvals />;
-    }
-    if (route === "/profile") return <Profile />;
-    if (route === "/insights") {
-      if (currentRole === "creator") return <AccessDenied role="Creator" needed="Reviewer or Owner" />;
-      return <Insights />;
-    }
     if (route === "/responsible") return <Responsible />;
-    return <Review />;
+    const entry = ALL_NAV.find((n) => n.path === route);
+    if (!entry) return <Review />;
+    if (!entry.roles.includes(currentRole)) return <AccessDenied role={roleLabel(currentRole)} needed={entry.roles.map(roleLabel).join(" or ")} />;
+    const pages = { "/review": Review, "/approvals": Approvals, "/insights": Insights, "/profile": Profile, "/governance": Governance, "/rules": Rules };
+    const Page = pages[route];
+    return <Page />;
   };
 
   return (
@@ -224,17 +244,7 @@ export default function App() {
         {renderRoute()}
       </Shell>
 
-      {(needsOnboarding || showOnboarding) && (
-        <OnboardingModal
-          initialUser={user}
-          isEdit={user.onboarded && showOnboarding}
-          onClose={() => setShowOnboarding(false)}
-          onSave={(u) => {
-            dispatch({ type: "setUserIdentity", user: u });
-            setShowOnboarding(false);
-          }}
-        />
-      )}
+      {modal}
     </>
   );
 }

@@ -284,7 +284,7 @@ export default function Review() {
             )}
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1.5fr", gap: 14 }}>
+          <div className="g-resp" style={{ "--cols": "1fr 1.5fr" }}>
             <div>
               <label style={{ fontSize: 12.5, fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: 4 }}>
                 Selected Brand Profile
@@ -328,7 +328,7 @@ export default function Review() {
         </div>
 
         {/* Step 2: Content Metadata */}
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12, marginBottom: 12 }}>
+        <div className="g-resp" style={{ "--cols": "2fr 1fr" }}>
           <Field label="Submission Title">
             <input
               type="text"
@@ -351,7 +351,7 @@ export default function Review() {
           </Field>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+        <div className="g-resp" style={{ "--cols": "1fr 1fr" }}>
           <Field label="Intended Audience">
             <input
               type="text"
@@ -491,9 +491,9 @@ export default function Review() {
         </div>
 
         {/* Severity Filter Counters */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, margin: "10px 0" }}>
+        <div className="g-resp" style={{ "--cols": "1fr 1fr 1fr" }}>
           <div style={{ background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 8px", textAlign: "center" }}>
-            <div style={{ fontSize: 10.5, color: "#FF6B5E", fontWeight: 700 }}>CRITICAL</div>
+            <div style={{ fontSize: 10.5, color: "var(--bad)", fontWeight: 700 }}>CRITICAL</div>
             <div style={{ fontSize: 18, fontWeight: 700 }}>{mandOpen.length}</div>
           </div>
           <div style={{ background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 8px", textAlign: "center" }}>
@@ -511,7 +511,7 @@ export default function Review() {
             Click "Run {activeBrand.name} Checks" to evaluate your copy against approved facts, specs, and guidelines.
           </Empty>
         ) : open.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "30px 16px", background: "rgba(31, 170, 140, 0.08)", border: "1px solid rgba(31, 170, 140, 0.3)", borderRadius: 12 }}>
+          <div style={{ textAlign: "center", padding: "30px 16px", background: "color-mix(in srgb, var(--ok) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--ok) 35%, transparent)", borderRadius: 12 }}>
             <Icon name="check" size={28} style={{ color: "var(--ok)", marginBottom: 8 }} />
             <h3 className="serif" style={{ margin: "4px 0", color: "var(--ok)" }}>All Findings Resolved</h3>
             <p className="muted small" style={{ margin: 0 }}>This copy is fully compliant with {activeBrand.name} approved standards.</p>

@@ -162,8 +162,8 @@ export default function FactSheetAssistant({ onClose, onApply, brandName = "Nova
           </form>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ background: "rgba(255, 184, 0, 0.12)", border: "1px solid #FFB800", borderRadius: 8, padding: "10px 14px", color: "var(--fg)" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 700, color: "#FFB800", fontSize: 13 }}>
+            <div style={{ background: "color-mix(in srgb, var(--warn) 14%, transparent)", border: "1px solid var(--warn)", borderRadius: 8, padding: "10px 14px", color: "var(--fg)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 700, color: "var(--warn)", fontSize: 13 }}>
                 <Icon name="alert" size={16} /> Draft — Verify Before Approval
               </div>
               <div style={{ fontSize: 12.5, marginTop: 4, color: "var(--muted)" }}>
@@ -197,7 +197,7 @@ export default function FactSheetAssistant({ onClose, onApply, brandName = "Nova
               {generated.restrictedClaims.length > 0 && (
                 <div>
                   <span className="muted small">Restricted Claims</span>
-                  <ul style={{ margin: "4px 0 0 16px", padding: 0, fontSize: 13, color: "#FF6B5E" }}>
+                  <ul style={{ margin: "4px 0 0 16px", padding: 0, fontSize: 13, color: "var(--bad)" }}>
                     {generated.restrictedClaims.map((r, i) => <li key={i}>{r}</li>)}
                   </ul>
                 </div>
