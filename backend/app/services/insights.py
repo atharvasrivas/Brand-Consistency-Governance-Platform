@@ -8,7 +8,18 @@ def compute(subs, brand_id=None, product_id=None):
         subs = [s for s in subs if s.get("brandId") == brand_id]
     if product_id:
         subs = [s for s in subs if s.get("productId") == product_id]
+    subs = [{**s, "status": "submitted" if s["status"] == "in_review" else s["status"]} for s in subs]
     by_status = Counter(s["status"] for s in subs)
+    pending = by_status["submitted"] + by_status["under_review"] + by_status["resubmitted"]
+    rules = defaultdict(lambda: {"count": 0, "submissions": set(), "category": ""})
+    for s in subs:
+        for f in s["findings"]:
+            key = f.get("guideline") or f.get("source") or f.get("label")
+            key = key if isinstance(key, str) else (key.get("text") or key.get("name") or str(key.get("id", "")) if isinstance(key, dict) else str(key))
+            r = rules[key]
+            r["count"] += f.get("occurrences") or 1
+            r["submissions"].add(s["id"])
+            r["category"] = f.get("category") or ""
     decided = [s for s in subs if s["status"] in ("approved", "rejected", "changes_requested") or len(s["versions"]) > 1]
     first_time = [s for s in subs if s["status"] == "approved" and len(s["versions"]) == 1]
     ever_changes = [s for s in subs if len(s["versions"]) > 1 or s["status"] in ("changes_requested", "rejected")]
@@ -51,9 +62,12 @@ def compute(subs, brand_id=None, product_id=None):
                 reviewers[a["by"]] += 1
     recurring = sorted(({"label": k, "category": v["category"], "severity": v["severity"], "count": v["count"], "submissions": len(v["submissions"])}
                         for k, v in rec.items()), key=lambda x: (-x["count"], x["label"]))[:12]
-    return {"totals": {"submissions": len(subs), "inReview": by_status["in_review"], "approved": by_status["approved"], "changesRequested": by_status["changes_requested"],
+    return {"totals": {"submissions": len(subs), "pending": pending, "inReview": pending, "draft": by_status["draft"], "submitted": by_status["submitted"],
+                       "underReview": by_status["under_review"], "resubmitted": by_status["resubmitted"], "approved": by_status["approved"], "changesRequested": by_status["changes_requested"],
                        "rejected": by_status["rejected"], "approvedFirstTime": len(first_time), "neededRevisions": len(ever_changes),
                        "firstTimeRate": round(len(first_time) / len(subs), 2) if subs else None},
+            "topRules": [{"rule": k, "category": v["category"], "count": v["count"], "submissions": len(v["submissions"])}
+                         for k, v in sorted(rules.items(), key=lambda kv: (-kv[1]["count"], str(kv[0])))[:10]],
             "recurring": recurring, "byCategory": [{"category": k, "count": v} for k, v in cats.most_common()],
             "timeline": [{"week": k, **v} for k, v in sorted(weeks.items())],
             "corrections": [{"label": k, "count": v} for k, v in corrections.most_common(8)],

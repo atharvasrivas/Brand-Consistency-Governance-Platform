@@ -5,12 +5,16 @@
     routed to the reviewer instead of blocking
   * reviewers do not submit; nobody decides their own submission; changes/rejection need a comment
   * approving with open or overridden mandatory findings needs explicit acknowledgement
+Status lifecycle: draft -> submitted -> under_review -> (approved | rejected | changes_requested);
+changes_requested -> resubmitted -> under_review ... Every decision, comment and revision is recorded with who and when.
 """
 from ..auth import ApiError
 from ..engine import review as engine
 from . import brands as B
 
 TYPES = ("blog", "social", "ad", "email", "document")
+STATUSES = ("draft", "submitted", "under_review", "changes_requested", "resubmitted", "approved", "rejected")
+PENDING = ("submitted", "under_review", "resubmitted")  # waiting on a reviewer
 LABEL = {"approved": "Approved the content", "changes_requested": "Requested changes", "rejected": "Rejected the content"}
 KEEP_IMG = ("IMG-PALETTE", "IMG-CONTRAST")  # need browser-side pixel analysis; the server cannot recompute them
 
@@ -79,9 +83,18 @@ def verified_findings(content, meta, image, ctx, client):
     return out, blockers
 
 
+def norm(sub):
+    """Records written before the status list was extended used a single 'in_review' state."""
+    if sub and sub.get("status") == "in_review":
+        sub["status"] = "submitted"
+    if sub is not None:
+        sub.setdefault("decisions", [])
+    return sub
+
+
 def _comment(sub, user, text):
     sub["comments"].append({"id": f"{sub['id']}-c{len(sub['comments'])}", "by": user["name"], "byId": user["id"], "designation": user.get("designation"),
-                            "role": user["role"], "text": text, "at": B.now()})
+                            "role": user["role"], "text": text, "at": B.now(), "version": len(sub["versions"])})
 
 
 def _next_id(store):
@@ -105,14 +118,20 @@ def create(store, cfg, user, d):
     meta, image = clean_meta(d), clean_image(d.get("image"))
     ctx = B.build_context(store, *scope_from(d))
     findings, blockers = verified_findings(content, meta, image, ctx, d.get("findings"))
-    if blockers:
+    draft = bool(d.get("draft"))
+    if blockers and not draft:
         raise ApiError(422, "Mandatory brand rules still need a decision", blockers=blockers)
     at = B.now()
     with store.lock:
+        if not draft:
+            for o in map(norm, store.list("submission")):
+                if (o["authorId"] == user["id"] and o["brandId"] == ctx["brand"]["id"] and o.get("productId") == (ctx["product"]["id"] if ctx["product"] else None)
+                        and o["status"] in PENDING and o["versions"][-1]["content"] == content):
+                    raise ApiError(409, f"This exact content is already waiting for review as {o['id']}.", submissionId=o["id"])
         sub = {"id": _next_id(store), "title": title, **meta, "authorId": user["id"], "author": user["name"], "authorDesignation": user.get("designation"),
-               "status": "in_review", "createdAt": at, "updatedAt": at,
-               "versions": [{"n": 1, "content": content, "at": at, "by": user["name"], "note": "First submission"}], "image": image, "findings": findings,
-               "comments": [], "activity": [{"at": at, "by": user["name"], "text": "Submitted for review"}],
+               "status": "draft" if draft else "submitted", "createdAt": at, "updatedAt": at,
+               "versions": [{"n": 1, "content": content, "at": at, "by": user["name"], "note": "Draft saved" if draft else "First submission"}], "image": image, "findings": findings,
+               "comments": [], "decisions": [], "activity": [{"at": at, "by": user["name"], "text": "Saved as draft" if draft else "Submitted for review"}],
                "noApprovedContent": not ctx["hasApproved"]}
         _stamp(sub, ctx)
         if (d.get("note") or "").strip():
@@ -122,16 +141,18 @@ def create(store, cfg, user, d):
 
 
 def get(store, user, sid):
-    s = store.get("submission", sid)
+    s = norm(store.get("submission", sid))
     if not s or (user["role"] == "creator" and s["authorId"] != user["id"]):
         raise ApiError(404, "Submission not found")
     return s
 
 
 def visible(store, user):
-    subs = store.list("submission")
+    subs = [norm(x) for x in store.list("submission")]
     if user["role"] == "creator":
         subs = [s for s in subs if s["authorId"] == user["id"]]
+    else:  # drafts are private to their author
+        subs = [s for s in subs if s["status"] != "draft" or s["authorId"] == user["id"]]
     return sorted(subs, key=lambda s: s["updatedAt"], reverse=True)
 
 
@@ -145,6 +166,8 @@ def resubmit(store, cfg, user, sid, d):
         raise ApiError(409, f"A submission that is {sub['status'].replace('_', ' ')} cannot be revised.")
     content = d.get("content")
     check_content(cfg, content)
+    if sub["versions"][-1]["content"] == content:
+        raise ApiError(409, "Nothing has changed since the last version. Edit the content before resubmitting.")
     fields = {k: str(d[k]).strip()[:200] for k in ("title", "audience", "purpose") if d.get(k)}
     if d.get("type"):
         fields["type"] = d["type"]
@@ -158,7 +181,7 @@ def resubmit(store, cfg, user, sid, d):
     at, n = B.now(), len(sub["versions"]) + 1
     with store.lock:
         sub.update(fields)
-        sub.update({"image": image, "status": "in_review", "updatedAt": at, "findings": findings, "noApprovedContent": not ctx["hasApproved"]})
+        sub.update({"image": image, "status": "resubmitted", "updatedAt": at, "findings": findings, "noApprovedContent": not ctx["hasApproved"]})
         _stamp(sub, ctx)
         note = (d.get("note") or "").strip()
         sub["versions"].append({"n": n, "content": content, "at": at, "by": user["name"], "note": note or "Revised"})
@@ -176,7 +199,7 @@ def decide(store, user, sid, d):
     if status not in LABEL:
         raise ApiError(422, "Status must be approved, changes_requested or rejected")
     sub = get(store, user, sid)
-    if sub["status"] != "in_review":
+    if sub["status"] not in PENDING:
         raise ApiError(409, f"This submission is already {sub['status'].replace('_', ' ')}.")
     if sub["authorId"] == user["id"]:
         raise ApiError(403, "You cannot decide your own submission. Ask another reviewer.")
@@ -190,6 +213,8 @@ def decide(store, user, sid, d):
     at = B.now()
     with store.lock:
         sub.update(status=status, updatedAt=at)
+        sub["decisions"].append({"n": len(sub["decisions"]) + 1, "status": status, "version": len(sub["versions"]), "by": user["name"], "byId": user["id"],
+                                 "role": user["role"], "at": at, "comment": comment[:4000], "acknowledged": bool(d.get("acknowledged"))})
         if comment:
             _comment(sub, user, comment[:4000])
         sub["activity"].append({"at": at, "by": user["name"], "text": LABEL[status] + (" (mandatory findings acknowledged)" if status == "approved" and d.get("acknowledged") else "")})
@@ -223,5 +248,45 @@ def recheck(store, user, sid):
         sub["findings"] = out
         _stamp(sub, ctx)
         sub["activity"].append({"at": B.now(), "by": user["name"], "text": f"Re-checked against {ctx['brand']['name']} v{ctx['brand']['version']}: {added} new finding{'' if added == 1 else 's'}"})
+        store.put("submission", sid, sub)
+    return sub
+
+
+def submit_draft(store, cfg, user, sid, d):
+    sub = get(store, user, sid)
+    if sub["authorId"] != user["id"]:
+        raise ApiError(403, "Only the author can submit a draft.")
+    if sub["status"] != "draft":
+        raise ApiError(409, f"This submission is already {sub['status'].replace('_', ' ')}.")
+    content = d.get("content") or sub["versions"][-1]["content"]
+    check_content(cfg, content)
+    meta, image = clean_meta({**sub, **{k: d[k] for k in ("type", "audience", "purpose") if d.get(k)}}), sub.get("image")
+    ctx = B.build_context(store, sub["brandId"], sub["productId"])
+    findings, blockers = verified_findings(content, meta, image, ctx, d.get("findings"))
+    if blockers:
+        raise ApiError(422, "Mandatory brand rules still need a decision", blockers=blockers)
+    at = B.now()
+    with store.lock:
+        sub.update({**meta, "findings": findings, "status": "submitted", "updatedAt": at, "noApprovedContent": not ctx["hasApproved"]})
+        _stamp(sub, ctx)
+        if content != sub["versions"][-1]["content"]:
+            sub["versions"].append({"n": len(sub["versions"]) + 1, "content": content, "at": at, "by": user["name"], "note": "Edited before submission"})
+        sub["activity"].append({"at": at, "by": user["name"], "text": "Submitted for review"})
+        store.put("submission", sid, sub)
+    return sub
+
+
+def start_review(store, user, sid):
+    if user["role"] not in ("reviewer", "owner"):
+        raise ApiError(403, "Only reviewers and owners can start a review.")
+    sub = get(store, user, sid)
+    if sub["authorId"] == user["id"]:
+        raise ApiError(403, "You cannot review your own submission.")
+    if sub["status"] not in ("submitted", "resubmitted"):
+        raise ApiError(409, f"This submission is {sub['status'].replace('_', ' ')}; it cannot be taken into review.")
+    at = B.now()
+    with store.lock:
+        sub.update(status="under_review", updatedAt=at, reviewer=user["name"], reviewerId=user["id"])
+        sub["activity"].append({"at": at, "by": user["name"], "text": "Started review"})
         store.put("submission", sid, sub)
     return sub

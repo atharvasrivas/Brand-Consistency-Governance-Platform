@@ -5,16 +5,18 @@ import Approvals from "./pages/Approvals.jsx";
 import Profile from "./pages/Profile.jsx";
 import Insights from "./pages/Insights.jsx";
 import Responsible from "./pages/Responsible.jsx";
+import MySubmissions from "./pages/MySubmissions.jsx";
 import Governance from "./pages/Governance.jsx";
 import Rules from "./pages/Rules.jsx";
 import Icon from "./components/Icon.jsx";
 import OnboardingModal from "./components/OnboardingModal.jsx";
 import { useStore } from "./store.jsx";
 import { ROLES } from "./engine/seed.js";
-import { navigate } from "./util.js";
+import { PENDING, navigate } from "./util.js";
 
 const ALL_NAV = [
   { path: "/review", label: "Brand Review", icon: "search", roles: ["creator", "reviewer", "owner"] },
+  { path: "/mine", label: "My Submissions", icon: "file", roles: ["creator", "owner"] },
   { path: "/approvals", label: "Approvals", icon: "check", roles: ["reviewer", "owner"] },
   { path: "/insights", label: "Insights", icon: "chart", roles: ["reviewer", "owner"] },
   { path: "/governance", label: "Governance", icon: "shield", roles: ["reviewer", "owner"] },
@@ -55,7 +57,7 @@ function useRoute() {
 function Shell({ route, children, onEditUser }) {
   const { state, dispatch } = useStore();
   const currentRole = state.role || state.user?.role || "creator";
-  const pending = state.submissions.filter((s) => s.status === "in_review").length;
+  const pending = state.submissions.filter((s) => PENDING.includes(s.status)).length;
   const pendingSuggestions = (state.suggestions || []).filter((s) => s.status === "pending").length;
 
   const visibleNav = ALL_NAV.filter((n) => n.roles.includes(currentRole));
@@ -233,7 +235,7 @@ export default function App() {
     const entry = ALL_NAV.find((n) => n.path === route);
     if (!entry) return <Review />;
     if (!entry.roles.includes(currentRole)) return <AccessDenied role={roleLabel(currentRole)} needed={entry.roles.map(roleLabel).join(" or ")} />;
-    const pages = { "/review": Review, "/approvals": Approvals, "/insights": Insights, "/profile": Profile, "/governance": Governance, "/rules": Rules };
+    const pages = { "/review": Review, "/mine": MySubmissions, "/approvals": Approvals, "/insights": Insights, "/profile": Profile, "/governance": Governance, "/rules": Rules };
     const Page = pages[route];
     return <Page />;
   };

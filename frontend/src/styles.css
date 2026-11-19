@@ -479,3 +479,5 @@ ins { color: #6ef0cf; background: rgba(61, 214, 176, 0.14); text-decoration: non
 .err { color: var(--bad); }
 @media (max-width: 720px) { .bar-row { grid-template-columns: 1fr auto; } .bar-row .bar { grid-column: 1 / -1; grid-row: 2; } }
 :root { --swatch-lime: #b7f34a; --swatch-coral: #ff6b5b; }
+.status.st-draft { background: var(--tint); color: var(--muted); }
+.pill-muted { color: var(--muted); }

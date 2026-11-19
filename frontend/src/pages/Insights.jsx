@@ -5,7 +5,7 @@ import { Empty, Field, PageHead, Pill, StatusPill, Tabs } from "../components/ui
 import { useStore } from "../store.jsx";
 import { findConflicts } from "../engine/checker.js";
 import { CONTENT_TYPES } from "../engine/seed.js";
-import { CATEGORY_COLOR, navigate } from "../util.js";
+import { CATEGORY_COLOR, PENDING, navigate } from "../util.js";
 
 const typeLabel = (t) => (CONTENT_TYPES.find((c) => c.id === t) || { label: t }).label;
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -89,8 +89,8 @@ function Radar({ brandFilter, onSelectBrand }) {
 
   const outcomes = ["in_review", "changes_requested", "approved", "rejected"].map((k) => ({
     id: k,
-    label: k.replace("_", " ").replace(/^./, (c) => c.toUpperCase()),
-    value: scopedSubmissions.filter((s) => s.status === k).length,
+    label: k === "in_review" ? "Pending review" : k.replace("_", " ").replace(/^./, (c) => c.toUpperCase()),
+    value: scopedSubmissions.filter((s) => (k === "in_review" ? PENDING.includes(s.status) : s.status === k)).length,
   }));
 
   const mandatoryOpen = scopedSubmissions.reduce(
@@ -192,7 +192,19 @@ function ServerStats({ brandId }) {
   if (!d || !d.totals.submissions) return null;
   const pct = (v) => (v == null ? "n/a" : `${Math.round(v * 100)}%`);
   return (
+    <>
+    <div className="kpis" style={{ marginBottom: 14 }}>
+      {[["Total submissions", d.totals.submissions], ["Approved", d.totals.approved], ["Rejected", d.totals.rejected], ["Pending review", d.totals.pending], ["Changes requested", d.totals.changesRequested]].map(([l, v]) => (
+        <div key={l} className="kpi"><b>{v}</b><span>{l}</span></div>
+      ))}
+    </div>
     <div className="grid2" style={{ marginBottom: 18 }}>
+      <div className="panel">
+        <h3>Most frequent brand violations</h3>
+        {d.recurring.length ? <Rows rows={d.recurring.map((r) => ({ label: r.label, value: r.count, text: `${r.count}× in ${r.submissions} submissions` }))} /> : <p className="muted">No findings recorded yet.</p>}
+        <h3>Commonly violated guidelines</h3>
+        {d.topRules.length ? <Rows rows={d.topRules.map((r) => ({ label: r.rule, value: r.count, text: `${r.count}× in ${r.submissions}` }))} /> : <p className="muted">None yet.</p>}
+      </div>
       <div className="panel">
         <h3>Compliance by brand</h3>
         <Rows max={1} rows={d.byBrand.map((b) => ({ label: `${b.brandName || b.brandId}${b.productName ? " / " + b.productName : ""}`, value: b.complianceRate || 0, text: `${pct(b.complianceRate)} of ${b.submissions}` }))} />
@@ -214,6 +226,7 @@ function ServerStats({ brandId }) {
         <Rows rows={d.byContentType.map((t) => ({ label: t.type, value: t.issues, text: `${t.issues} in ${t.submissions}` }))} />
       </div>
     </div>
+    </>
   );
 }
 

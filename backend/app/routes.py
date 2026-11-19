@@ -224,6 +224,18 @@ def new_version(sid):
     return jsonify({"submission": workflow.resubmit(store(), cfg(), g.user, sid, body())})
 
 
+@bp.post("/submissions/<sid>/submit")
+@require()
+def submit_draft(sid):
+    return jsonify({"submission": workflow.submit_draft(store(), cfg(), g.user, sid, body())})
+
+
+@bp.post("/submissions/<sid>/start-review")
+@require()
+def start_review(sid):
+    return jsonify({"submission": workflow.start_review(store(), g.user, sid)})
+
+
 @bp.post("/submissions/<sid>/decision")
 @require()
 def decision(sid):
