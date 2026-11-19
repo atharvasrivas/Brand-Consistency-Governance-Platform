@@ -32,10 +32,10 @@ function ThemeSwitch() {
   return (
     <div className="theme-switch" role="group" aria-label="Colour theme">
       <button className={theme === "lime" ? "on" : ""} onClick={() => pick("lime")} aria-pressed={theme === "lime"} title="Midnight Lime">
-        <span className="theme-dot" style={{ background: "#b7f34a" }} /> Lime
+        <span className="theme-dot" style={{ background: "var(--swatch-lime)" }} /> Lime
       </button>
       <button className={theme === "coral" ? "on" : ""} onClick={() => pick("coral")} aria-pressed={theme === "coral"} title="Navy & Coral">
-        <span className="theme-dot" style={{ background: "#ff6b5b" }} /> Coral
+        <span className="theme-dot" style={{ background: "var(--swatch-coral)" }} /> Coral
       </button>
     </div>
   );

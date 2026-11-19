@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import Icon from "../components/Icon.jsx";
-import { Field, PageHead, Pill, ColorPickerField, FileUploadField } from "../components/ui.jsx";
+import { Field, PageHead, Pill, ColorPickerField, FileUploadField, AssetList } from "../components/ui.jsx";
 import FactSheetAssistant from "../components/FactSheetAssistant.jsx";
 import { useStore } from "../store.jsx";
 import { findConflicts } from "../engine/checker.js";
@@ -148,9 +148,6 @@ export default function Profile() {
         </button>
         <button className={`tab ${activeTab === "products" ? "on" : ""}`} onClick={() => setActiveTab("products")}>
           Product Fact Sheets ({d.products?.length || 0})
-        </button>
-        <button className={`tab ${activeTab === "claims" ? "on" : ""}`} onClick={() => setActiveTab("claims")}>
-          Claims & Terminology
         </button>
         <button className={`tab ${activeTab === "visuals" ? "on" : ""}`} onClick={() => setActiveTab("visuals")}>
           Visual Identity & Palette
@@ -315,6 +312,9 @@ export default function Profile() {
                   )}
                 </div>
 
+                {prod.imageUrl && <img src={prod.imageUrl} alt={prod.name} style={{ maxHeight: 120, maxWidth: "100%", objectFit: "contain", alignSelf: "flex-start", borderRadius: 8 }} />}
+                {prod.description && <div style={{ fontSize: 13.5 }}>{prod.description}</div>}
+                {(prod.assetList || []).length > 0 && <div className="muted small">Documents: {(prod.assetList || []).map((a) => a.name).join(", ")}</div>}
                 <div style={{ fontSize: 13.5, color: "var(--fg)", lineHeight: 1.5 }}>
                   <b>Specifications:</b> {prod.specifications || "No specifications listed."}
                 </div>
@@ -472,15 +472,12 @@ export default function Profile() {
                 />
               </Field>
 
-              <Field label="Approved Visual Assets" hint="Asset references">
-                <textarea
-                  className="inp"
-                  rows={3}
-                  value={(d.approvedAssets || []).join("\n")}
-                  disabled={!isOwner}
-                  onChange={(e) => setD({ ...d, approvedAssets: lines(e.target.value) })}
-                />
-              </Field>
+              <AssetList
+                label="Logo variations & other brand assets"
+                items={d.assetList || []} canEdit={isOwner && API_CONFIGURED} upload={uploadAsset} urlFor={assetUrl}
+                kinds={[["logo", "Logo variation"], ["image", "Image"], ["guideline", "Guideline document"], ["other", "Other"]]}
+                onChange={(items) => setD({ ...d, assetList: items })}
+              />
 
               <Field label="Deprecated / Retired Asset Names" hint="Files flagged if detected">
                 <textarea
@@ -606,6 +603,29 @@ export default function Profile() {
                   onChange={(e) => setEditingProduct({ ...editingProduct, specifications: e.target.value })}
                 />
               </Field>
+              <Field label="Product Description">
+                <textarea className="inp" rows={2} value={editingProduct.description || ""} onChange={(e) => setEditingProduct({ ...editingProduct, description: e.target.value })} />
+              </Field>
+              <Field label="Notes" hint="Internal context for reviewers">
+                <textarea className="inp" rows={2} value={editingProduct.notes || ""} onChange={(e) => setEditingProduct({ ...editingProduct, notes: e.target.value })} />
+              </Field>
+              <FileUploadField
+                label="Product Image"
+                hint="Shown on the product fact sheet"
+                file={editingProduct.imageUrl ? { name: `${editingProduct.name || "Product"} image`, url: editingProduct.imageUrl } : null}
+                onFileSelect={async (f) => {
+                  if (!f) { setEditingProduct({ ...editingProduct, imageAssetId: "", imageUrl: null }); return; }
+                  if (!API_CONFIGURED) return;
+                  try { const up = await uploadAsset(f, "image"); setEditingProduct((cur) => ({ ...cur, imageAssetId: up.assetId, imageUrl: assetUrl(up.assetId) })); }
+                  catch (e) { setSavedMsg(e.message || "Upload failed"); }
+                }}
+              />
+              <AssetList
+                label="Supporting documents & images"
+                items={editingProduct.assetList || []} canEdit={API_CONFIGURED} upload={uploadAsset} urlFor={assetUrl}
+                kinds={[["guideline", "Supporting document"], ["image", "Image"], ["other", "Other"]]}
+                onChange={(items) => setEditingProduct({ ...editingProduct, assetList: items })}
+              />
               <div className="modal-actions">
                 <button type="submit" className="btn btn-primary" style={{ width: "100%", justifyContent: "center" }}>
                   Save Product Fact Sheet
