@@ -7,7 +7,7 @@ from flask import Blueprint, Response, current_app, g, jsonify, request
 from .ai.gemini import Gemini
 from .auth import ApiError, require
 from .engine import review as engine
-from .services import assets, assistant, demo, insights, suggestions, workflow
+from .services import assets, assistant, demo, governance, insights, suggestions, workflow
 from .services import brands as B
 
 bp = Blueprint("api", __name__, url_prefix="/api")
@@ -240,6 +240,37 @@ def comment(sid):
 @require()
 def recheck(sid):
     return jsonify({"submission": workflow.recheck(store(), g.user, sid)})
+
+
+# ----- governance tools (drift, change impact, guideline conflicts) -----
+@bp.get("/governance/drift")
+@require("reviewer", "owner")
+def gov_drift():
+    return jsonify(governance.drift(store().list("submission"), request.args.get("brandId")))
+
+
+@bp.get("/governance/impact")
+@require("reviewer", "owner")
+def gov_impact():
+    return jsonify(governance.impact(store(), request.args.get("brandId"), governance.impact_decisions(store())))
+
+
+@bp.post("/governance/impact/decision")
+@require("reviewer", "owner")
+def gov_impact_decide():
+    return jsonify({"decision": governance.decide_impact(store(), g.user, body())}), 201
+
+
+@bp.get("/governance/conflicts")
+@require("reviewer", "owner")
+def gov_conflicts():
+    return jsonify(governance.conflicts(store(), request.args.get("brandId"), governance.conflict_decisions(store())))
+
+
+@bp.post("/governance/conflicts/resolve")
+@require("owner")
+def gov_conflict_resolve():
+    return jsonify({"decision": governance.resolve_conflict(store(), g.user, body())}), 201
 
 
 # ----- insights & demo -----

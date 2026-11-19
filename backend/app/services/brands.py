@@ -70,6 +70,11 @@ def _tone(x):
     return {"phrase": ph, "prefer": s(x.get("prefer"), 120), "reason": s(x.get("reason"), 300)} if ph else None
 
 
+def _guideline(x):
+    t = s(x.get("text"), 600)
+    return {"text": t, "source": s(x.get("source"), 300)} if t else None
+
+
 def _spec(x):
     n, v = s(x.get("name"), 120), s(x.get("value"), 200)
     return {"name": n, "value": v, "source": s(x.get("source"), 300)} if n and v else None
@@ -79,7 +84,7 @@ def _colour(x):
     h = s(x.get("hex"), 7)
     if not HEX.match(h):
         return None
-    return {"name": s(x.get("name"), 60) or h.upper(), "hex": h.upper()}
+    return {"name": s(x.get("name"), 60) or h.upper(), "hex": h.upper(), "role": x.get("role") if x.get("role") in ("primary", "secondary", "accent") else "primary"}
 
 
 def _asset(x):
@@ -102,6 +107,9 @@ def clean_brand(d):
            "previousNames": _strs(d.get("previousNames"), 10, 100), "fonts": _strs(d.get("fonts"), 10, 80),
            "deprecatedAssets": _strs(d.get("deprecatedAssets"), 20, 120), "logoAssetId": s(d.get("logoAssetId"), 40),
            "toneAvoid": _list(d.get("toneAvoid"), _tone),
+           "tagline": s(d.get("tagline"), 200), "industry": s(d.get("industry"), 120), "history": s(d.get("history"), 4000),
+           "values": _strs(d.get("values"), 20, 80), "voice": s(d.get("voice"), 1500), "targetAudience": s(d.get("targetAudience"), 1500),
+           "guidelines": _list(d.get("guidelines"), _guideline), "legal": _list(d.get("legal"), _guideline),
            "colours": _list(d.get("colours"), _colour, 24)}
     for k, fn in COMMON:
         out[k] = _list(d.get(k), fn)
@@ -113,7 +121,8 @@ def clean_product(d):
     if not name:
         raise ApiError(422, "A product needs a name")
     out = {"name": name, "description": s(d.get("description"), 3000), "previousNames": _strs(d.get("previousNames"), 10, 100),
-           "imageAssetId": s(d.get("imageAssetId"), 40), "specs": _list(d.get("specs"), _spec)}
+           "imageAssetId": s(d.get("imageAssetId"), 40), "specs": _list(d.get("specs"), _spec),
+           "notes": s(d.get("notes"), 3000), "guidelines": _list(d.get("guidelines"), _guideline), "legal": _list(d.get("legal"), _guideline)}
     for k, fn in COMMON:
         out[k] = _list(d.get(k), fn)
     return out
