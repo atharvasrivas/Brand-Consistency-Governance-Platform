@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { apiFetch, API_CONFIGURED } from "../api.js";
 import Icon from "../components/Icon.jsx";
 import { Empty, Field, PageHead, Pill, StatusPill, Tabs } from "../components/ui.jsx";
 import { useStore } from "../store.jsx";
@@ -109,6 +110,7 @@ function Radar({ brandFilter, onSelectBrand }) {
 
   return (
     <>
+      <ServerStats brandId={state.activeBrandId} />
       <div className="kpis">
         <div className="kpi"><b>{scopedSubmissions.length}</b><span>Submissions Checked</span></div>
         <div className="kpi"><b>{scopedSubmissions.reduce((n, s) => n + (s.findings || []).length, 0)}</b><span>Total Issues Flagged</span></div>
@@ -158,6 +160,60 @@ function Radar({ brandFilter, onSelectBrand }) {
         </div>
       </div>
     </>
+  );
+}
+
+
+function Rows({ rows, max }) {
+  const m = max || Math.max(1, ...rows.map((r) => r.value));
+  return (
+    <div className="stack">
+      {rows.map((r) => (
+        <div key={r.label} className="bar-row" title={r.title || ""}>
+          <small style={{ minWidth: 110 }}>{r.label}</small>
+          <span className="bar" style={{ width: `${Math.max(2, (r.value / m) * 100)}%` }} />
+          <small>{r.text != null ? r.text : r.value}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Server-computed statistics across every submission the signed-in role may see.
+function ServerStats({ brandId }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    if (!API_CONFIGURED) return;
+    apiFetch("GET", `/api/insights${brandId ? `?brandId=${encodeURIComponent(brandId)}` : ""}`).then(setD).catch((e) => setErr(e.message));
+  }, [brandId]);
+  if (!API_CONFIGURED) return null;
+  if (err) return <p className="err">{err}</p>;
+  if (!d || !d.totals.submissions) return null;
+  const pct = (v) => (v == null ? "n/a" : `${Math.round(v * 100)}%`);
+  return (
+    <div className="grid2" style={{ marginBottom: 18 }}>
+      <div className="panel">
+        <h3>Compliance by brand</h3>
+        <Rows max={1} rows={d.byBrand.map((b) => ({ label: `${b.brandName || b.brandId}${b.productName ? " / " + b.productName : ""}`, value: b.complianceRate || 0, text: `${pct(b.complianceRate)} of ${b.submissions}` }))} />
+        <h3>Approved first time</h3>
+        <p><b>{pct(d.totals.firstTimeRate)}</b> <small>({d.totals.approvedFirstTime} of {d.totals.submissions}; {d.totals.neededRevisions} needed revisions)</small></p>
+      </div>
+      <div className="panel">
+        <h3>Submissions over time</h3>
+        <Rows rows={d.timeline.map((t) => ({ label: t.week, value: t.submissions, text: `${t.submissions} sub · ${t.approved} approved · ${t.issues} issues` }))} />
+      </div>
+      <div className="panel">
+        <h3>Most corrected issues</h3>
+        {d.corrections.length ? <Rows rows={d.corrections.map((c) => ({ label: c.label, value: c.count }))} /> : <p className="muted">No accepted corrections yet.</p>}
+      </div>
+      <div className="panel">
+        <h3>Review performance</h3>
+        {d.reviewActivity.length ? <Rows rows={d.reviewActivity.map((r) => ({ label: r.reviewer, value: r.decisions, text: `${r.decisions} decisions` }))} /> : <p className="muted">No decisions yet.</p>}
+        <h3>Issues by content type</h3>
+        <Rows rows={d.byContentType.map((t) => ({ label: t.type, value: t.issues, text: `${t.issues} in ${t.submissions}` }))} />
+      </div>
+    </div>
   );
 }
 

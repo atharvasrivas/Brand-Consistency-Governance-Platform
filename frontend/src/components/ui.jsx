@@ -177,9 +177,14 @@ export function FileUploadField({ onFileSelect, file, accept = "image/*,.pdf,.sv
               </div>
             </div>
           </div>
-          <button type="button" className="btn" style={{ height: 32, fontSize: 12.5 }} onClick={() => onFileSelect(null)}>
-            Replace
-          </button>
+          <span style={{ display: "flex", gap: 6 }}>
+            <button type="button" className="btn" style={{ height: 32, fontSize: 12.5 }} onClick={() => fileInputRef.current && fileInputRef.current.click()}>
+              Replace
+            </button>
+            <button type="button" className="btn" style={{ height: 32, fontSize: 12.5 }} onClick={() => onFileSelect(null)}>
+              Remove
+            </button>
+          </span>
         </div>
       ) : (
         <div

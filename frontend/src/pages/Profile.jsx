@@ -5,6 +5,7 @@ import FactSheetAssistant from "../components/FactSheetAssistant.jsx";
 import { useStore } from "../store.jsx";
 import { findConflicts } from "../engine/checker.js";
 import { timeAgo } from "../util.js";
+import { assetUrl, uploadAsset, API_CONFIGURED } from "../api.js";
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const list = (s) => (s || "").split(",").map((x) => x.trim()).filter(Boolean);
@@ -188,6 +189,25 @@ export default function Profile() {
                 />
               </Field>
 
+              <Field label="Tagline">
+                <input className="inp" value={d.tagline || ""} disabled={!isOwner} onChange={(e) => setD({ ...d, tagline: e.target.value })} />
+              </Field>
+              <Field label="Industry">
+                <input className="inp" value={d.industry || ""} disabled={!isOwner} onChange={(e) => setD({ ...d, industry: e.target.value })} />
+              </Field>
+              <Field label="Brand History" hint="Milestones and timeline">
+                <textarea className="inp" rows={3} value={d.history || ""} disabled={!isOwner} onChange={(e) => setD({ ...d, history: e.target.value })} />
+              </Field>
+              <Field label="Brand Values" hint="Comma-separated">
+                <input className="inp" value={d.valuesText || ""} disabled={!isOwner} onChange={(e) => setD({ ...d, valuesText: e.target.value })} />
+              </Field>
+              <Field label="Target Audience">
+                <textarea className="inp" rows={2} value={d.targetAudience || ""} disabled={!isOwner} onChange={(e) => setD({ ...d, targetAudience: e.target.value })} />
+              </Field>
+              <Field label="Brand Voice" hint="How the brand speaks">
+                <textarea className="inp" rows={2} value={d.voiceText || ""} disabled={!isOwner} onChange={(e) => setD({ ...d, voiceText: e.target.value })} />
+              </Field>
+
               <Field label="Heritage & Origin" hint="Founding story, country of origin, and heritage">
                 <textarea
                   className="inp"
@@ -202,9 +222,17 @@ export default function Profile() {
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <FileUploadField
                 label="Primary Brand Logo"
-                hint="Upload official vector (.svg) or high-res logo"
-                file={d.logo ? { name: `${d.name}-Logo.svg`, url: d.logo } : null}
-                onFileSelect={(f) => isOwner && setD({ ...d, logo: f ? f.url : null })}
+                hint="Upload, replace or remove the official logo (PNG, SVG, JPEG; preview shown)"
+                file={d.logoUrl || d.logo ? { name: `${d.name} logo`, url: d.logoUrl || (d.logo && d.logo.length > 1 ? d.logo : null) } : null}
+                onFileSelect={async (f) => {
+                  if (!isOwner) return;
+                  if (!f) { setD({ ...d, logoAssetId: "", logoUrl: null }); return; }
+                  if (!API_CONFIGURED) { setD({ ...d, logoUrl: f.url }); return; }
+                  try {
+                    const up = await uploadAsset(f, "logo");
+                    setD((cur) => ({ ...cur, logoAssetId: up.assetId, logoUrl: assetUrl(up.assetId) }));
+                  } catch (e) { setSavedMsg(e.message || "Upload failed"); }
+                }}
               />
 
               <Field label="Tone & Personality" hint="Comma-separated personality traits">
