@@ -40,6 +40,15 @@ export async function apiFetch(method, path, body) {
   return data;
 }
 
+export const assetUrl = (id) => (id ? `${BASE}/api/assets/${encodeURIComponent(id)}` : null);
+
+// Upload an image/document picked in the browser (data URL) to the server; returns { assetId, name, mime }.
+export async function uploadAsset(file, kind = "other") {
+  const m = /^data:([^;]+);base64,(.*)$/s.exec(file.url || "");
+  if (!m) throw new ApiError(422, "Only image files can be uploaded here");
+  return apiFetch("POST", "/api/assets", { name: file.name, mime: m[1], data: m[2], kind });
+}
+
 const post = (path, body) => apiFetch("POST", path, body);
 
 // POST /api/review { content, meta, image, brandId, productId, profile, product }
@@ -158,6 +167,8 @@ export function fromSrvBrand(b) {
     terminology: (b.terminology || []).map(fromSrvTerm),
     palette: (b.colours || []).map((c) => ({ name: c.name, hex: c.hex, role: "" })),
     fonts: b.fonts || [], approvedAssets: (b.assets || []).map((a) => a.name), deprecatedAssets: b.deprecatedAssets || [],
+    tagline: b.tagline || "", industry: b.industry || "", history: b.history || "", valuesText: (b.values || []).join(", "),
+    voiceText: b.voice || "", targetAudience: b.targetAudience || "", logoAssetId: b.logoAssetId || "", logoUrl: assetUrl(b.logoAssetId),
     version: b.version, updatedAt: b.updatedAt, demo: !!b.demo, products: (b.products || []).map(fromSrvProduct), _srv: b,
   };
 }
@@ -167,7 +178,9 @@ export function toSrvBrand(b, changeNote) {
   const reason = (t) => ((base.restrictedClaims || []).find((r) => r.text === t) || {}).reason || "";
   const personality = Array.isArray(b.voice) && b.voice.length ? b.voice : String(b.personality || "").split(",").map((x) => x.trim()).filter(Boolean);
   return {
-    ...base, name: b.name, description: b.description, heritage: b.heritage, personality, toneGuidance: b.tone || "",
+    ...base, name: b.name, description: b.description, heritage: b.heritage, personality,
+    tagline: b.tagline || "", industry: b.industry || "", history: b.history || "", values: String(b.valuesText || "").split(",").map((x) => x.trim()).filter(Boolean),
+    voice: b.voiceText || "", targetAudience: b.targetAudience || "", logoAssetId: b.logoAssetId || "", toneGuidance: b.tone || "",
     approvedClaims: (b.approvedClaims || []).map((c) => ({ id: c.id, text: c.claim, source: c.source || "", status: c.status === "draft" ? "draft" : "approved" })),
     restrictedClaims: (b.restrictedClaims || []).map((t) => ({ text: t, reason: reason(t) })),
     terminology: (b.terminology || []).map(toSrvTerm),
