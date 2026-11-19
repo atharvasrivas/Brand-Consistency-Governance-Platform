@@ -51,7 +51,7 @@ def current_user():
     if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", uid):
         raise ApiError(401, "Your identity is missing. Complete the welcome screen first.")
     return {"id": uid, "role": role, "name": _clean(request.headers.get("X-User-Name"), 2, 80, "name"),
-            "designation": _clean(request.headers.get("X-User-Designation"), 2, 80, "designation")}
+            "designation": (unquote(request.headers.get("X-User-Designation", "")).strip()[:80])}
 
 
 def require(*roles):

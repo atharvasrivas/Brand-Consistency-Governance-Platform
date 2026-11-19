@@ -8,7 +8,7 @@ const BASE = ((typeof import.meta !== "undefined" && import.meta.env && import.m
 
 export const API_CONFIGURED = !!BASE;
 
-let actor = { role: "creator", name: "", id: "", designation: "" };
+let actor = { role: "creator", name: "", id: "" };
 export function setActor(a) { actor = a; }
 
 export class ApiError extends Error {
@@ -27,7 +27,6 @@ export async function apiFetch(method, path, body) {
       "X-User-Role": actor.role,
       "X-User-Name": encodeURIComponent(actor.name || ""),
       "X-User-Id": actor.id || "",
-      "X-User-Designation": encodeURIComponent(actor.designation || ""),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });

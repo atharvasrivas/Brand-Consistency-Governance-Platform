@@ -8,7 +8,6 @@ const Ctx = createContext(null);
 
 const defaultUser = {
   name: "",
-  designation: "",
   role: "creator",
   onboarded: false,
 };
@@ -28,19 +27,20 @@ function loadUser() {
 
 function fresh() {
   const user = loadUser();
-  const brands = SEED_BRANDS;
-  const activeBrand = brands[0];
-  const activeProduct = activeBrand.products && activeBrand.products[0] ? activeBrand.products[0].id : null;
+  // With a server configured, real data only: never seed sample brands or submissions.
+  const brands = API_CONFIGURED ? [] : SEED_BRANDS;
+  const activeBrand = brands[0] || null;
+  const activeProduct = activeBrand && activeBrand.products && activeBrand.products[0] ? activeBrand.products[0].id : null;
 
   return {
     user,
     role: user.role || "creator",
     brands,
-    activeBrandId: activeBrand.id,
+    activeBrandId: activeBrand ? activeBrand.id : null,
     activeProductId: activeProduct,
     profile: activeBrand,
-    changelog: seedChangelog(),
-    submissions: buildSeedSubmissions(),
+    changelog: API_CONFIGURED ? [] : seedChangelog(),
+    submissions: API_CONFIGURED ? [] : buildSeedSubmissions(),
     suggestions: [],
     editId: null,
     nextId: 1008,
@@ -56,6 +56,7 @@ function load() {
     if (raw) {
       const parsed = JSON.parse(raw);
       const user = loadUser();
+      if (API_CONFIGURED) return fresh();
       const brands = parsed.brands && parsed.brands.length ? parsed.brands : SEED_BRANDS;
       const activeBrandId = parsed.activeBrandId || brands[0].id;
       const profile = brands.find((b) => b.id === activeBrandId) || brands[0];
@@ -353,7 +354,6 @@ export function StoreProvider({ children }) {
       role: state.role || state.user?.role || "creator",
       name: state.user?.name || "",
       id: state.user?.id || "",
-      designation: state.user?.designation || "",
     });
   }, [state.role, state.user]);
 

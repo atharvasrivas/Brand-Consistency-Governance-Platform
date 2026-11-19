@@ -20,7 +20,7 @@ export default function FindingCard({ f, selected, onSelect, act, readOnly }) {
   };
 
   return (
-    <article id={`f-${f.id}`} className={`fcard st-${f.status} ${selected ? "sel" : ""}`} style={{ "--cat": CATEGORY_COLOR[f.category] || "#8E7CFF" }} onClick={onSelect}>
+    <article id={`f-${f.id}`} className={`fcard st-${f.status} ${selected ? "sel" : ""}`} style={{ "--cat": CATEGORY_COLOR[f.category] || "var(--accent)" }} onClick={onSelect}>
       <header className="fc-head">
         <span className="fc-dot" />
         <b className="fc-title">{f.label}</b>

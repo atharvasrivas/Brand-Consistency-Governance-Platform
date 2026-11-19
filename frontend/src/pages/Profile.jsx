@@ -127,7 +127,7 @@ export default function Profile() {
 
       {/* Permissions Notification for Creator/Reviewer */}
       {!isOwner && (
-        <div style={{ background: "rgba(91, 76, 224, 0.08)", border: "1px solid rgba(91, 76, 224, 0.25)", borderRadius: 10, padding: "10px 16px", marginBottom: 18, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ background: "color-mix(in srgb, var(--accent) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--accent) 25%, transparent)", borderRadius: 10, padding: "10px 16px", marginBottom: 18, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ fontSize: 13 }}>
             <Icon name="shield" size={15} style={{ color: "var(--accent)", marginRight: 8, verticalAlign: "middle" }} />
             <b>{role === "creator" ? "Creator Perspective" : "Reviewer Perspective"}:</b> Only Brand Owners can publish official edits. You can view all approved rules, specs, and claims.
@@ -306,12 +306,12 @@ export default function Profile() {
 
                 {prod.restrictedClaims && prod.restrictedClaims.length > 0 && (
                   <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", color: "#FF6B5E", marginBottom: 4 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", color: "var(--bad)", marginBottom: 4 }}>
                       Restricted Claims ({prod.restrictedClaims.length})
                     </div>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       {prod.restrictedClaims.map((r, i) => (
-                        <span key={i} style={{ background: "rgba(255, 107, 94, 0.12)", color: "#FF6B5E", padding: "3px 8px", borderRadius: 6, fontSize: 12 }}>
+                        <span key={i} style={{ background: "color-mix(in srgb, var(--bad) 12%, transparent)", color: "var(--bad)", padding: "3px 8px", borderRadius: 6, fontSize: 12 }}>
                           {r}
                         </span>
                       ))}
@@ -352,10 +352,10 @@ export default function Profile() {
 
             {/* Restricted Claims */}
             <div style={{ background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 10, padding: 14 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: "#FF6B5E", marginBottom: 10 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "var(--bad)", marginBottom: 10 }}>
                 Restricted / Prohibited Claims
               </div>
-              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, display: "flex", flexDirection: "column", gap: 8, color: "#FF6B5E" }}>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, display: "flex", flexDirection: "column", gap: 8, color: "var(--bad)" }}>
                 {(d.restrictedClaims || []).map((r, i) => (
                   <li key={i}>{r}</li>
                 ))}
@@ -374,10 +374,10 @@ export default function Profile() {
                 <tbody>
                   {(d.terminology || []).map((t, i) => (
                     <tr key={i}>
-                      <td><span style={{ color: "#FF6B5E", fontWeight: 600 }}>{t.from}</span></td>
+                      <td><span style={{ color: "var(--bad)", fontWeight: 600 }}>{t.from}</span></td>
                       <td><span style={{ color: "var(--ok)", fontWeight: 600 }}>{t.to}</span></td>
                       <td>
-                        <span style={{ textTransform: "uppercase", fontSize: 11, fontWeight: 700, color: t.strictness === "critical" ? "#FF6B5E" : "var(--warn)" }}>
+                        <span style={{ textTransform: "uppercase", fontSize: 11, fontWeight: 700, color: t.strictness === "critical" ? "var(--bad)" : "var(--warn)" }}>
                           {t.strictness || "warning"}
                         </span>
                       </td>
@@ -507,7 +507,7 @@ export default function Profile() {
                   name,
                   description: desc,
                   voice: ["clear", "professional"],
-                  palette: [{ name: "Brand Primary", hex: "#5B4CE0", role: "Primary" }],
+                  palette: [{ name: "Brand Primary", hex: "var(--accent)", role: "Primary" }],
                   fonts: ["Inter"],
                   approvedClaims: [],
                   restrictedClaims: [],
