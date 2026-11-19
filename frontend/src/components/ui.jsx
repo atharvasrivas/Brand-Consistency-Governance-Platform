@@ -76,7 +76,7 @@ export function PageHead({ eyebrow, title, children }) {
 
 // Interactive Color Picker & Palette Editor
 export function ColorPickerField({ color, onChange, onRemove, label = "Brand Color" }) {
-  const [hex, setHex] = useState(color.hex || "#5B4CE0");
+  const [hex, setHex] = useState(color.hex || "var(--accent)");
   const [name, setName] = useState(color.name || "");
 
   const handleHexChange = (newHex) => {
@@ -93,7 +93,7 @@ export function ColorPickerField({ color, onChange, onRemove, label = "Brand Col
     <div style={{ display: "flex", alignItems: "center", gap: 10, background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 10, padding: "8px 12px" }}>
       <input
         type="color"
-        value={hex.startsWith("#") && hex.length === 7 ? hex : "#5B4CE0"}
+        value={hex.startsWith("#") && hex.length === 7 ? hex : "var(--accent)"}
         onChange={(e) => handleHexChange(e.target.value)}
         style={{ width: 36, height: 36, borderRadius: 8, border: "none", cursor: "pointer", background: "none" }}
         title="Choose color"
@@ -189,7 +189,7 @@ export function FileUploadField({ onFileSelect, file, accept = "image/*,.pdf,.sv
           onClick={() => fileInputRef.current?.click()}
           style={{
             border: dragOver ? "2px dashed var(--accent)" : "1px dashed var(--line)",
-            background: dragOver ? "rgba(91, 76, 224, 0.05)" : "var(--panel2)",
+            background: dragOver ? "color-mix(in srgb, var(--accent) 5%, transparent)" : "var(--panel2)",
             borderRadius: 10,
             padding: "20px 16px",
             textAlign: "center",

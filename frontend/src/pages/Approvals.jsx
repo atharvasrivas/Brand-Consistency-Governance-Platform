@@ -249,7 +249,7 @@ function Detail({ s }) {
             <button
               className="btn"
               disabled={!canDecide}
-              style={{ color: "#FF6B5E" }}
+              style={{ color: "var(--bad)" }}
               onClick={() => decide("rejected")}
             >
               <Icon name="x" size={16} /> Reject
@@ -435,7 +435,7 @@ export default function Approvals() {
                         </button>
                         <button
                           className="btn sm"
-                          style={{ color: "#FF6B5E" }}
+                          style={{ color: "var(--bad)" }}
                           onClick={() => dispatch({ type: "decideSuggestion", id: sug.id, status: "rejected" })}
                         >
                           <Icon name="x" size={14} /> Reject

@@ -151,7 +151,7 @@ function Radar({ brandFilter, onSelectBrand }) {
             <Bars
               rows={outcomes.map((o) => ({
                 ...o,
-                color: { in_review: "#8E7CFF", changes_requested: "#F5B84B", approved: "#3DD6B0", rejected: "#FF6B5E" }[o.id],
+                color: { in_review: "var(--accent)", changes_requested: "#F5B84B", approved: "#3DD6B0", rejected: "var(--bad)" }[o.id],
               }))}
             />
           </section>

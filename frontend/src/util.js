@@ -7,9 +7,9 @@ export const STATUS = {
 
 export const CATEGORY_COLOR = {
   "Facts & claims": "#F5B84B",
-  Terminology: "#8E7CFF",
+  Terminology: "var(--accent)",
   "Language & tone": "#3DD6B0",
-  "Brand aura": "#F180FE",
+  "Brand aura": "var(--accent)",
   "Content patterns": "#5CC8FF",
   "Visual identity": "#FF8A7A",
   "Access & channel fit": "#7BE08F",

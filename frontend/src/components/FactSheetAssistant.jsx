@@ -197,7 +197,7 @@ export default function FactSheetAssistant({ onClose, onApply, brandName = "Nova
               {generated.restrictedClaims.length > 0 && (
                 <div>
                   <span className="muted small">Restricted Claims</span>
-                  <ul style={{ margin: "4px 0 0 16px", padding: 0, fontSize: 13, color: "#FF6B5E" }}>
+                  <ul style={{ margin: "4px 0 0 16px", padding: 0, fontSize: 13, color: "var(--bad)" }}>
                     {generated.restrictedClaims.map((r, i) => <li key={i}>{r}</li>)}
                   </ul>
                 </div>
