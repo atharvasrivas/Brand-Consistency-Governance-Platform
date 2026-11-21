@@ -110,7 +110,7 @@ function Radar({ brandFilter, onSelectBrand }) {
 
   return (
     <>
-      <ServerStats brandId={state.activeBrandId} />
+      <ServerStats brandId={brandFilter === "all" ? "" : brandFilter} />
       <div className="kpis">
         <div className="kpi"><b>{scopedSubmissions.length}</b><span>Submissions Checked</span></div>
         <div className="kpi"><b>{scopedSubmissions.reduce((n, s) => n + (s.findings || []).length, 0)}</b><span>Total Issues Flagged</span></div>

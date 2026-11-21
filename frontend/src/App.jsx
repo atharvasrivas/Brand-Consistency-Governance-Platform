@@ -13,6 +13,30 @@ import OnboardingModal from "./components/OnboardingModal.jsx";
 import { useStore } from "./store.jsx";
 import { ROLES } from "./engine/seed.js";
 import { PENDING, navigate } from "./util.js";
+import { apiFetch } from "./api.js";
+
+const LEVELS = { off: ["muted", "AI off: no key"], unverified: ["warn", "AI key set, not verified"], text: ["ok", "AI text verified"], full: ["ok", "AI text + image verified"], failing: ["danger", "AI failing"] };
+
+function ApiPill({ remote, role }) {
+  const [st, setSt] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const load = () => apiFetch("GET", "/api/ai/status").then(setSt).catch(() => setSt(null));
+  useEffect(() => { if (remote) load(); }, [remote]);
+  if (!remote) return <span className="pill pill-muted" title="Running on the built-in engine in this browser">Local engine</span>;
+  const [tone, label] = LEVELS[(st && st.level) || "off"] || LEVELS.off;
+  const diag = async () => {
+    setBusy(true);
+    try { const r = await apiFetch("POST", "/api/ai/diagnose", {}, { timeout: 90000 }); window.alert(`Overall: ${r.overall}\n` + (r.stages || []).map((v) => `${v.label}: ${v.ok ? "OK" : "FAILED"}${v.detail ? " – " + v.detail : ""}`).join("\n")); }
+    catch (e) { window.alert(e.message); } finally { setBusy(false); load(); }
+  };
+  return (
+    <>
+      <span className="pill pill-ok" title="Connected to the server API">API connected</span>
+      <span className={`pill pill-${tone}`} title={st && st.lastError ? st.lastError : "Real Gemini status: key, reachability, text and image analysis"}>{label}</span>
+      {role === "owner" && <button className="btn ghost" disabled={busy} onClick={diag}>{busy ? "Testing…" : "Run diagnostics"}</button>}
+    </>
+  );
+}
 
 const ALL_NAV = [
   { path: "/review", label: "Brand Review", icon: "search", roles: ["creator", "reviewer", "owner"] },
@@ -84,12 +108,7 @@ function Shell({ route, children, onEditUser }) {
         </nav>
 
         <div className="top-right">
-          <span
-            className={state.remote ? "pill pill-ok" : "pill pill-muted"}
-            title={state.remote ? "Connected to the Flask API: data is shared and checks run on the server" : "Running on the built-in multi-brand engine in this browser"}
-          >
-            {state.remote ? "API connected" : "Local engine"}
-          </span>
+          <ApiPill remote={state.remote} role={state.role} />
 
           <ThemeSwitch />
           {/* Active Brand Badge */}
