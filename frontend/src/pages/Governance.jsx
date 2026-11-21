@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Empty, PageHead, Pill, Tabs } from "../components/ui.jsx";
 import { useStore } from "../store.jsx";
 import { apiFetch, API_CONFIGURED } from "../api.js";
@@ -12,26 +12,33 @@ const RES = [
 
 function useLoad(path, brandId, enabled) {
   const [s, setS] = useState({ loading: true, data: null, error: "" });
+  const n = useRef(0);
   const load = useCallback(() => {
     if (!enabled) return;
+    const mine = ++n.current;
     setS((x) => ({ ...x, loading: true, error: "" }));
     apiFetch("GET", `${path}${brandId ? `?brandId=${encodeURIComponent(brandId)}` : ""}`)
-      .then((data) => setS({ loading: false, data, error: "" }))
-      .catch((e) => setS({ loading: false, data: null, error: e.message || "Could not load" }));
+      .then((data) => { if (mine === n.current) setS({ loading: false, data, error: "" }); })
+      .catch((e) => { if (mine === n.current) setS((x) => ({ loading: false, data: x.data, error: e.message || "Could not load" })); });
   }, [path, brandId, enabled]);
   useEffect(load, [load]);
   return [s, load];
 }
 
+const Retry = ({ error, load }) => (
+  <div className="panel"><p className="err">{error}</p><button className="btn" onClick={load}>Try again</button></div>
+);
+
 function Drift({ brandId }) {
-  const [s] = useLoad("/api/governance/drift", brandId, true);
+  const [s, load] = useLoad("/api/governance/drift", brandId, true);
   const d = s.data;
-  if (s.loading) return <p className="muted">Analysing submissions…</p>;
-  if (s.error) return <p className="err">{s.error}</p>;
+  if (s.loading && !d) return <p className="muted">Analysing submissions…</p>;
+  if (s.error && !d) return <Retry error={s.error} load={load} />;
   if (!d || !d.recurring.length) return <Empty icon="chart" title="No drift detected">Drift appears when the same issue recurs across two or more submissions. Analysed {d ? d.analysed : 0} submissions.</Empty>;
   const max = Math.max(1, ...d.trend.map((t) => t.count));
   return (
     <div className="stack">
+      <p className="muted small">{d.analysed} submissions analysed · consistency {d.consistency == null ? "n/a" : `${Math.round(d.consistency * 100)}%`} (share of submissions with no recurring pattern) · {d.definition}</p>
       {d.alerts.length > 0 && <div className="panel">{d.alerts.map((a, i) => <p key={i}>⚠ {a}</p>)}</div>}
       <div className="grid2">
         <div className="panel">
@@ -40,8 +47,16 @@ function Drift({ brandId }) {
             <div key={i} className="row-item">
               <div><b>{r.label}</b> <Pill tone={SEV[r.severity]}>{r.severity}</Pill></div>
               <small>{r.brandName}{r.productName ? ` / ${r.productName}` : ""} · {r.submissions} submissions · {r.occurrences} occurrences · {r.pattern}</small>
-              {r.example && <p className="snip">“{r.example}”</p>}
-              {r.guideline && <small>Rule: {r.guideline}</small>}
+              <small> · {r.domain === "visual" ? "Visual pattern" : "Text pattern"} · in {Math.round((r.share || 0) * 100)}% of submissions</small>
+              {(r.examples || []).map((e, k) => <p key={k} className="snip">“{e.text}” <small>({e.title})</small></p>)}
+              {r.guideline && <small>Rule violated: {r.guideline}</small>}
+              {r.recommendation && (
+                <div className="muted small">
+                  <p style={{ margin: "4px 0" }}><b>Why it matters:</b> {r.recommendation.explanation}</p>
+                  {r.recommendation.correction && <p style={{ margin: "4px 0" }}><b>{r.domain === "visual" ? "Visual direction" : "Preferred wording"}:</b> {r.recommendation.correction}</p>}
+                  <p style={{ margin: "4px 0" }}><b>Guidance for future content:</b> {r.recommendation.guidance}</p>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -65,24 +80,30 @@ function Impact({ brandId }) {
   const decide = async (key, decision) => {
     try { await apiFetch("POST", "/api/governance/impact/decision", { key, decision }); setErr(""); load(); } catch (e) { setErr(e.message); }
   };
-  if (s.loading) return <p className="muted">Scanning earlier submissions…</p>;
-  if (s.error) return <p className="err">{s.error}</p>;
+  if (s.loading && !s.data) return <p className="muted">Scanning earlier submissions…</p>;
+  if (s.error && !s.data) return <Retry error={s.error} load={load} />;
   const list = s.data ? s.data.affected : [];
   if (!list.length) return <Empty icon="check" title="No submissions are affected">When a fact sheet changes, earlier submissions that depend on the changed fact appear here.</Empty>;
   return (
     <div className="stack">
       {err && <p className="err">{err}</p>}
-      <p className="muted">{s.data.open} open · A person decides what happens to each affected submission; nothing is changed automatically.</p>
+      {s.error && <Retry error={s.error} load={load} />}
+      {(s.data.warnings || []).length > 0 && <p className="warn-note">Some records were skipped: {s.data.warnings.join("; ")}</p>}
+      <p className="muted">{s.data.scanned ? `${s.data.scanned.submissions} submissions scanned · ` : ""}{s.data.open} open · A person decides what happens to each affected submission; nothing is changed automatically.</p>
       {list.map((r) => (
         <div key={r.key} className="panel">
-          <div><b>{r.title}</b> <Pill tone={LEVEL[r.level]}>{r.level} impact</Pill> <Pill>{r.status}</Pill></div>
+          <div><b>{r.title}</b> <Pill tone={LEVEL[r.level]}>{r.level}</Pill> <Pill>{r.status}</Pill></div>
           <small>{r.author} · {r.subject} v{r.version} · {r.kind} {r.change}</small>
           <p>{r.before && <del>{r.before}</del>} {r.after && <ins>{r.after}</ins>}</p>
+          {r.reason && <small><b>Why flagged:</b> {r.reason}</small>}
           {r.snippet && <p className="snip">…{r.snippet}…</p>}
           <small>{r.recommendation}</small>
-          {r.decision ? <p><Pill tone="ok">Decision: {r.decision.decision}</Pill> <small>by {r.decision.by}</small></p> : (
+          {r.decision && r.decision.decision !== "reopen" ? (
+            <p><Pill tone="ok">Decision: {r.decision.decision}</Pill> <small>by {r.decision.by}</small> <button className="btn ghost" onClick={() => decide(r.key, "reopen")}>Reopen</button></p>
+          ) : (
             <div className="row-actions">
               <button className="btn" onClick={() => decide(r.key, "recheck")}>Recheck needed</button>
+              <button className="btn ghost" onClick={() => decide(r.key, "resolved")}>Mark resolved</button>
               <button className="btn ghost" onClick={() => decide(r.key, "dismiss")}>Dismiss</button>
               <button className="btn ghost" onClick={() => decide(r.key, "withdraw")}>Withdraw</button>
             </div>

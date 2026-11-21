@@ -140,12 +140,28 @@ export function FileUploadField({ onFileSelect, file, accept = "image/*,.pdf,.sv
     const isImage = selected.type.startsWith("image/");
     const reader = new FileReader();
     reader.onload = (e) => {
-      onFileSelect({
-        name: selected.name,
-        size: selected.size,
-        type: selected.type,
-        url: isImage ? e.target.result : null,
-      });
+      const dataUrl = e.target.result;
+      const done = (url, mime, size) => {
+        const m = /^data:([^;]+);base64,(.*)$/s.exec(url || "");
+        onFileSelect({ name: selected.name, size: size || selected.size, type: selected.type, url: isImage ? url : null,
+          mime: isImage && m ? m[1] : selected.type, data: isImage && m ? m[2] : undefined });
+      };
+      if (!isImage || selected.type === "image/gif" || selected.type === "image/svg+xml") return done(dataUrl);
+      // Downscale large pictures in the browser so the vision request stays small and fast
+      const img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, 1280 / Math.max(img.width, img.height));
+        if (k === 1 && selected.size < 900000) return done(dataUrl);
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        const keepPng = selected.type === "image/png" && c.width * c.height < 600000;
+        const out = c.toDataURL(keepPng ? "image/png" : "image/jpeg", 0.85);
+        return done(out);
+      };
+      img.onerror = () => done(dataUrl);
+      img.src = dataUrl;
+      return undefined;
     };
     reader.readAsDataURL(selected);
   };

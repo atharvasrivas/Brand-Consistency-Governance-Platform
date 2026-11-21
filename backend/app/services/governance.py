@@ -8,6 +8,7 @@ from datetime import datetime
 
 from ..auth import ApiError
 from . import brands as B
+from . import versions as V
 
 RANK = {"critical": 3, "warning": 2, "suggestion": 1}
 
@@ -23,37 +24,69 @@ def _week(iso):
 
 
 # ---------------------------------------------------------------- drift
-def drift(subs, brand_id=None):
+def _domain(f):
+    rid = str(f.get("ruleId") or "")
+    return "visual" if rid.startswith("IMG") or f.get("category") == "Visual identity" else "text"
+
+
+def live(subs):
+    """Submissions that count towards analytics: drafts are private work in progress and are excluded everywhere."""
+    return [s for s in subs if s.get("status") != "draft"]
+
+
+def drift(subs, brand_id=None, product_id=None):
+    """Recurring textual and visual patterns: the same finding in two or more submissions of the same brand/product.
+    Every number is a count of stored submissions or findings; nothing is estimated."""
+    subs = live(subs)
     if brand_id:
         subs = [s for s in subs if s.get("brandId") == brand_id]
-    groups = defaultdict(lambda: {"count": 0, "subs": set(), "authors": set(), "weeks": defaultdict(int), "sample": None, "severity": "suggestion"})
+    if product_id:
+        subs = [s for s in subs if s.get("productId") == product_id]
+    groups = {}
     for s in subs:
         wk = _week(s["createdAt"])
         for f in s.get("findings", []):
-            if f.get("category") == "Content patterns":
-                continue  # structural nudges are not brand drift
+            if f.get("category") == "Content patterns" or f.get("status") == "dismissed":
+                continue
             k = (s.get("brandId"), s.get("productId"), f.get("ruleId") or f.get("label"), f.get("label"))
-            g = groups[k]
+            g = groups.setdefault(k, {"count": 0, "subs": {}, "authors": set(), "weeks": defaultdict(int), "examples": [], "severity": "suggestion", "fixes": defaultdict(int),
+                                      "types": defaultdict(int), "resolved": 0, "mandatory": False})
             n = f.get("occurrences") or 1
             g["count"] += n
-            g["subs"].add(s["id"])
+            g["subs"][s["id"]] = s["title"]
             g["authors"].add(s["author"])
             g["weeks"][wk] += n
-            g["sample"] = g["sample"] or f.get("quote")
-            g["category"] = f.get("category")
-            g["rule"] = (f.get("source") or {}).get("ref") or f.get("label")
-            g["brandName"], g["productName"] = s.get("brandName"), s.get("productName")
+            g["types"][s.get("type") or "other"] += 1
+            if f.get("quote") and f["quote"] not in [e["text"] for e in g["examples"]] and len(g["examples"]) < 3:
+                g["examples"].append({"text": f["quote"], "submissionId": s["id"], "title": s["title"]})
+            if f.get("suggestion"):
+                g["fixes"][f["suggestion"]] += 1
+            g["resolved"] += f.get("status") == "accepted"
+            g["mandatory"] = g["mandatory"] or f.get("strictness") == "mandatory"
+            g.update(category=f.get("category"), rule=(f.get("source") or {}).get("ref") or f.get("label"), domain=_domain(f), why=f.get("why"),
+                     brandName=s.get("brandName"), productName=s.get("productName"))
             if RANK.get(f.get("severity"), 0) > RANK[g["severity"]]:
                 g["severity"] = f["severity"]
-    items = []
+    total, items = len(subs), []
     for (bid, pid, _rid, label), g in groups.items():
         if len(g["subs"]) < 2:
             continue
-        items.append({"brandId": bid, "brandName": g["brandName"], "productId": pid, "productName": g["productName"], "label": label,
-                      "category": g["category"], "guideline": g["rule"], "severity": g["severity"], "occurrences": g["count"],
-                      "submissions": len(g["subs"]), "creators": len(g["authors"]), "example": g["sample"],
-                      "trend": [{"week": w, "count": c} for w, c in sorted(g["weeks"].items())],
-                      "pattern": "multiple creators" if len(g["authors"]) > 1 else "same creator repeating"})
+        best = max(g["fixes"].items(), key=lambda kv: kv[1])[0] if g["fixes"] else None
+        visual = g["domain"] == "visual"
+        items.append({"brandId": bid, "brandName": g["brandName"], "productId": pid, "productName": g["productName"], "label": label, "domain": g["domain"],
+                      "category": g["category"], "guideline": g["rule"], "severity": g["severity"], "mandatory": g["mandatory"], "occurrences": g["count"],
+                      "submissions": len(g["subs"]), "submissionIds": sorted(g["subs"]), "share": round(len(g["subs"]) / total, 2) if total else None,
+                      "creators": len(g["authors"]), "example": g["examples"][0]["text"] if g["examples"] else None, "examples": g["examples"],
+                      "contentTypes": [{"type": t, "submissions": n} for t, n in sorted(g["types"].items(), key=lambda kv: -kv[1])],
+                      "trend": [{"week": w, "count": c} for w, c in sorted(g["weeks"].items())], "correctionsAccepted": g["resolved"],
+                      "pattern": "multiple creators" if len(g["authors"]) > 1 else "same creator repeating",
+                      "recommendation": {
+                          "explanation": g["why"] or f"{label} keeps appearing in {len(g['subs'])} of {total} submissions.",
+                          "correction": best,
+                          "preferredLanguage": None if visual else best,
+                          "visualDirection": best if visual else None,
+                          "guidance": (f"Before writing, check the brand's {'visual identity' if visual else 'approved wording'} for “{g['rule']}”. "
+                                       f"Share this with the {len(g['authors'])} creator{'s' if len(g['authors']) != 1 else ''} involved.")}})
     items.sort(key=lambda x: (-RANK[x["severity"]], -x["submissions"], -x["occurrences"]))
     by_target = defaultdict(int)
     for s in subs:
@@ -65,104 +98,139 @@ def drift(subs, brand_id=None):
     for i in items:
         for t in i["trend"]:
             weeks[t["week"]] += t["count"]
-    return {"recurring": items, "hotspots": hot[:8], "alerts": alerts, "trend": [{"week": w, "count": c} for w, c in sorted(weeks.items())],
-            "analysed": len(subs)}
+    hit = {sid for i in items for sid in i["submissionIds"]}
+    return {"recurring": items, "text": [i for i in items if i["domain"] == "text"], "visual": [i for i in items if i["domain"] == "visual"],
+            "hotspots": hot[:8], "alerts": alerts, "trend": [{"week": w, "count": c} for w, c in sorted(weeks.items())], "analysed": total,
+            "submissionsWithPatterns": len(hit),
+            "consistency": round(1 - len(hit) / total, 2) if total else None,
+            "definition": "A pattern is the same finding in two or more submissions. Drafts and structural 'content pattern' hints are excluded."}
 
 
 # ---------------------------------------------------------------- change impact
-def _facts(rec):
-    """Map a stable key -> displayed text for everything checkable in one brand or product record."""
-    out = {}
-    for c in rec.get("approvedClaims", []):
-        if c.get("status") != "draft":
-            out[f"claim:{c['id']}"] = ("Approved claim", c["text"])
-    for r in rec.get("restrictedClaims", []):
-        out[f"restricted:{r['id']}"] = ("Restricted claim", r["text"])
-    for t in rec.get("terminology", []):
-        out[f"term:{t['id']}"] = ("Terminology", f"{t['avoid']} → {t['prefer']}")
-    for sp in rec.get("specs", []):
-        out[f"spec:{sp['id']}"] = ("Specification", f"{sp['name']}: {sp['value']}")
-    for i, n in enumerate(rec.get("previousNames", [])):
-        out[f"prev:{n.lower()}"] = ("Previous name", n)
-    out["name"] = ("Name", rec.get("name", ""))
-    out["logo"] = ("Logo", rec.get("logoAssetId", ""))
-    for g in rec.get("guidelines", []):
-        out[f"guideline:{g['id']}"] = ("Guideline", g["text"])
-    return out
+VISUAL_FIELDS = {"logoAssetId", "imageAssetId", "assets", "colours", "fonts", "deprecatedAssets"}
+IMPACT_CHOICES = ("recheck", "dismiss", "withdraw", "resolved", "reopen")
 
 
-def _diff(old, new):
-    a, b = _facts(old), _facts(new)
-    changes = []
-    for k, (kind, txt) in a.items():
-        if k not in b:
-            changes.append({"kind": kind, "change": "removed", "before": txt, "after": None})
-        elif b[k][1] != txt:
-            changes.append({"kind": kind, "change": "changed", "before": txt, "after": b[k][1]})
-    for k, (kind, txt) in b.items():
-        if k not in a and txt:
-            changes.append({"kind": kind, "change": "added", "before": None, "after": txt})
-    return changes
+def _after_colon(t):
+    return t.split(":", 1)[1].strip() if ":" in (t or "") else (t or "")
 
 
-def _tokens_of(change):
-    """Distinctive old text to look for in saved content: the old value of a spec, the old claim text, the old name."""
-    before = change["before"] or ""
-    if change["kind"] == "Specification" and ":" in before:
-        before = before.split(":", 1)[1]
-    if change["kind"] == "Terminology":
-        before = before.split("→")[1] if "→" in before else before  # old preferred term is no longer approved
-    return before.strip()
+def _needles(c):
+    """(text to look for in saved content, why it matters) for one field change. Empty when there is nothing text-checkable."""
+    f, ch, b, a = c["field"], c["change"], c.get("before") or "", c.get("after") or ""
+    out = []
+    if f == "approvedClaims" and ch in ("removed", "modified"):
+        out.append((b, "This claim is no longer approved in its old wording."))
+    elif f == "restrictedClaims" and ch in ("added", "modified"):
+        out.append((a, "This wording is now a restricted claim."))
+    elif f == "terminology":
+        if ch == "added" and "→" in a:
+            out.append((a.split("→")[0].strip(), "This wording is now on the avoid list."))
+        if ch == "modified":
+            if "→" in b:
+                out.append((b.split("→")[1].strip(), "This term is no longer the preferred wording."))
+            if "→" in a:
+                out.append((a.split("→")[0].strip(), "This wording is now on the avoid list."))
+    elif f == "specs" and ch in ("removed", "modified"):
+        out.append((_after_colon(b), "This specification value is no longer approved."))
+    elif f == "name" and ch == "modified":
+        out.append((b, "The brand or product name changed."))
+    elif f == "toneAvoid" and ch in ("added", "modified"):
+        out.append((a, "This phrase is now off-voice."))
+    return [(n.strip(), why) for n, why in out if len(n.strip()) >= 2]
+
+
+def _stamped(sub, level, pid):
+    v = sub.get("brandVersion") if level == "brand" else sub.get("productVersion")
+    return v or 0
 
 
 def impact(store, brand_id, decisions):
+    """Compares every consecutive pair of saved versions of the brand and each product, and lists the saved submissions whose
+    current text still uses wording that a later version changed. A submission re-checked against the newer version is not listed.
+    One bad record is reported in `warnings`; it never stops the scan."""
+    if not brand_id:
+        raise ApiError(422, "Choose a brand to scan")
     brand = B.get_brand(store, brand_id)
-    subs = [s for s in store.list("submission") if s.get("brandId") == brand_id]
+    subs, warnings = [s for s in store.list("submission") if s.get("brandId") == brand_id and s.get("versions")], []
     targets = [("brand", None, brand)] + [("product", p["id"], p) for p in B.list_products(store, brand_id)]
-    results = []
+    results, changes_seen, cleared = [], 0, 0
     for level, pid, rec in targets:
-        vs = sorted(B.versions(store, level, rec["id"]), key=lambda v: v["version"])
+        try:
+            vs = sorted(B.versions(store, level, rec["id"]), key=lambda v: v["version"])
+        except Exception as e:  # noqa: BLE001
+            warnings.append(f"{rec.get('name', rec.get('id'))}: version history could not be read ({e})")
+            continue
         for older, newer in zip(vs, vs[1:]):
-            for ch in _diff(older, newer):
-                if ch["change"] == "added":
+            for c in V.diff(older, newer):
+                changes_seen += 1
+                visual = c["field"] in VISUAL_FIELDS
+                needles = [] if visual else _needles(c)
+                if not visual and not needles:
                     continue
-                needle = _tokens_of(ch)
-                if len(needle) < 3:
-                    continue
-                pattern = re.compile(rf"(?<![\w]){re.escape(needle)}(?![\w])", re.I)
                 for s in subs:
-                    if pid and s.get("productId") != pid:
-                        continue
-                    latest = s["versions"][-1]
-                    if s.get("profileVersion") is not None and level == "brand" and s.get("brandVersion", 0) >= newer["version"]:
-                        continue
-                    m = pattern.search(latest["content"])
-                    if not m:
-                        continue
-                    key = f"{s['id']}|{rec['id']}|{newer['version']}|{ch['kind']}|{needle.lower()}"
-                    a, b = max(0, m.start() - 40), min(len(latest["content"]), m.end() + 40)
-                    d = decisions.get(key)
-                    results.append({"key": key, "submissionId": s["id"], "title": s["title"], "status": s["status"], "author": s["author"],
-                                    "level": level, "subject": rec["name"], "version": newer["version"], "kind": ch["kind"], "change": ch["change"],
-                                    "before": ch["before"], "after": ch["after"], "snippet": latest["content"][a:b].replace("\n", " "),
-                                    "recommendation": ("Recheck this content against the updated fact sheet and replace the outdated wording."
-                                                       if s["status"] != "approved" else "Approved content may now be out of date. Decide whether to recheck or withdraw it."),
-                                    "decision": d})
-    results.sort(key=lambda r: (r["decision"] is not None, r["status"] == "approved", r["submissionId"]))
-    return {"affected": results, "open": sum(1 for r in results if not r["decision"])}
+                    try:
+                        if pid and s.get("productId") != pid:
+                            continue
+                        if _stamped(s, level, pid) >= newer["version"]:
+                            cleared += 1
+                            continue
+                        latest = s["versions"][-1]
+                        content = latest.get("content") or ""
+                        if visual:
+                            if not (s.get("image") or s.get("imageAssetId")):
+                                continue
+                            hit, why, snippet = True, "The approved visual identity changed (logo, colours, fonts or assets). Images in this submission were checked against the older version.", (s.get("image") or {}).get("name") or "attached image"
+                            needle = c["field"]
+                        else:
+                            hit = None
+                            for needle, why in needles:
+                                m = re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", content, re.I)
+                                if m:
+                                    hit = m
+                                    break
+                            if not hit:
+                                continue
+                            a_, b_ = max(0, hit.start() - 40), min(len(content), hit.end() + 40)
+                            snippet = content[a_:b_].replace("\n", " ")
+                        key = f"{s['id']}|{rec['id']}|{newer['version']}|{c['field']}|{c.get('itemId') or ''}|{needle.lower()}"
+                        d = decisions.get(key)
+                        results.append({"key": key, "submissionId": s["id"], "title": s["title"], "status": s["status"], "author": s["author"],
+                                        "level": level, "subject": rec["name"], "version": newer["version"], "kind": c["label"], "change": c["change"],
+                                        "before": c.get("before"), "after": c.get("after"), "reason": why, "snippet": snippet,
+                                        "checkedAgainst": _stamped(s, level, pid), "changedBy": newer.get("updatedBy"), "changedAt": newer.get("updatedAt"),
+                                        "recommendation": ("Re-check this content against the updated profile and replace the outdated wording."
+                                                           if s["status"] != "approved" else "Approved content may now be out of date. Decide whether to re-check or withdraw it."),
+                                        "decision": d})
+                    except Exception as e:  # noqa: BLE001
+                        warnings.append(f"{s.get('id', '?')}: skipped ({type(e).__name__})")
+    seen, uniq = set(), []
+    for r in results:
+        if r["key"] not in seen:
+            seen.add(r["key"])
+            uniq.append(r)
+    isopen = lambda r: not r["decision"] or r["decision"]["decision"] == "reopen"  # noqa: E731
+    uniq.sort(key=lambda r: (not isopen(r), r["status"] == "approved", r["submissionId"]))
+    return {"affected": uniq, "open": sum(1 for r in uniq if isopen(r)), "scanned": {"submissions": len(subs), "versionChanges": changes_seen, "clearedByRecheck": cleared},
+            "warnings": sorted(set(warnings))[:10]}
 
 
 def decide_impact(store, user, d):
     key, choice = str(d.get("key") or ""), d.get("decision")
-    if not key or choice not in ("recheck", "dismiss", "withdraw"):
-        raise ApiError(422, "Choose recheck, dismiss or withdraw")
-    rec = {"key": key, "decision": choice, "note": B.s(d.get("note"), 400), "by": user["name"], "at": B.now()}
+    if not key or choice not in IMPACT_CHOICES:
+        raise ApiError(422, "Choose recheck, dismiss, withdraw, resolved or reopen")
+    rec = {"key": key, "decision": choice, "note": B.s(d.get("note"), 400), "by": user["name"], "byId": user["id"], "at": B.now()}
     store.put("impact_decision", B.nid("imp"), rec)
     return rec
 
 
+def impact_history(store, key=None):
+    rows = sorted(store.list("impact_decision"), key=lambda r: r.get("at") or "")
+    return [r for r in rows if not key or r["key"] == key]
+
+
 def impact_decisions(store):
-    return {r["key"]: r for r in store.list("impact_decision")}
+    return {r["key"]: r for r in impact_history(store)}  # latest decision per alert wins
 
 
 # ---------------------------------------------------------------- guideline conflicts

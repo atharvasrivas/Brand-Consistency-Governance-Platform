@@ -29,3 +29,10 @@ def fetch(store, aid):
     if not a:
         raise ApiError(404, "File not found")
     return a["mime"], base64.b64decode(a["data"]), a["name"]
+
+
+def save_raw(store, user, name, mime, b64, size, kind="image"):
+    """Store an already-validated file (for example an uploaded advertisement) and return its asset id."""
+    aid = B.nid("a")
+    store.put("asset", aid, {"id": aid, "name": name or "image", "mime": mime, "size": size, "data": b64, "kind": kind, "uploadedBy": user["name"], "uploadedAt": B.now()})
+    return aid

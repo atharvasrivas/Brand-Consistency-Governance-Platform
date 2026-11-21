@@ -8,12 +8,12 @@ import { CONTENT_TYPES, SAMPLE_DRAFTS_BY_BRAND } from "../engine/seed.js";
 import { CATEGORY_COLOR, diffWords, navigate } from "../util.js";
 
 const blankMeta = { title: "", type: "blog", audience: "", purpose: "" };
-const imgSig = (i) => (i ? [i.name, i.alt, i.fonts, i.textInImage] : null);
+const imgSig = (i) => (i ? [i.name, i.alt, i.fonts, i.textInImage, i.size] : null);
 
 function Highlighted({ text, findings, selectedId, onSelect }) {
   const spans = findings
     .filter((f) => f.scope === "text" && f.start !== undefined && f.status !== "accepted")
-    .flatMap((f) => (f.spans && f.spans.length ? f.spans : [[f.start, f.end]]).map(([start, end]) => ({ ...f, start, end })))
+    .flatMap((f) => (f.spans && f.spans.length ? f.spans : [[f.start, f.end]]).map(([start, end], i) => ({ ...f, start, end, _k: `${f.id}-${i}` })))
     .sort((a, b) => a.start - b.start);
   const parts = [];
   let pos = 0;
@@ -23,7 +23,7 @@ function Highlighted({ text, findings, selectedId, onSelect }) {
     const isCritical = f.strictness === "critical" || f.strictness === "mandatory" || f.severity === "critical";
     parts.push(
       <mark
-        key={f.id}
+        key={f._k}
         className={`hl ${isCritical ? "hl-m" : "hl-f"} ${f.status === "rejected" ? "hl-x" : ""} ${selectedId === f.id ? "hl-sel" : ""}`}
         style={{ "--cat": CATEGORY_COLOR[f.category] || "var(--accent)" }}
         onClick={() => onSelect(f.id)}
@@ -61,12 +61,21 @@ function RewriteModal({ original, rw, onAccept, onEdit, onClose, brandName }) {
             <div className="cmp-text">{diff.filter((d) => d.t !== "del").map((d, i) => (d.t === "add" ? <ins key={i}>{d.v}</ins> : <span key={i}>{d.v}</span>))}</div>
           </div>
         </div>
+        {rw.notice && <p className="warn-note"><Icon name="alert" size={15} /> {rw.notice}</p>}
+        {rw.aiNotice && <p className="hint">{rw.aiNotice}</p>}
+        {rw.remaining && rw.remaining.length > 0 && (
+          <div className="warn-note" style={{ display: "block" }}>
+            <b><Icon name="alert" size={15} /> Not compliant yet: {rw.remaining.length} finding(s) still need a person</b>
+            <ul>{rw.remaining.map((r, i) => <li key={i}><span className="mono">{r.quote}</span> · {r.label}{r.suggestion ? ` — ${r.suggestion}` : ""}</li>)}</ul>
+          </div>
+        )}
+        {rw.compliant === true && <p className="hint">Re-checked after the rewrite: no mandatory findings remain. A reviewer still approves the final text.</p>}
         {changed ? (
           <div className="applied">
             <b>What changed, and why</b>
             <ul>
               {rw.applied.map((a, i) => (
-                <li key={i}><span className="mono">{a.quote}</span> → <span className="mono">{a.suggestion}</span> <span className="muted small">· {a.label}</span></li>
+                <li key={i}><span className="mono">{a.quote}</span> → <span className="mono">{a.suggestion || a.text}</span> <span className="muted small">· {a.label}</span></li>
               ))}
             </ul>
           </div>
@@ -109,6 +118,30 @@ export default function Review() {
   const [rw, setRw] = useState(null);
   const [note, setNote] = useState("");
   const [toast, setToast] = useState("");
+  const [notice, setNotice] = useState("");
+  const [imageAnalysis, setImageAnalysis] = useState(null);
+  const [aiNotes, setAiNotes] = useState([]);
+  const seq = useRef(0);
+  const ctl = useRef(null);
+  const DRAFT_KEY = `bg-draft:${activeBrand.id}:${editId || "new"}`;
+
+  // Autosave the text so a reload, crash or failed request never loses it
+  useEffect(() => {
+    if (editing) return undefined;
+    try { const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); if (d && d.content && !content) { setContent(d.content); setMeta((m) => ({ ...m, ...d.meta })); } } catch { /* storage unavailable */ }
+    return undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (editing) return undefined;
+    const t = setTimeout(() => { try { if (content) localStorage.setItem(DRAFT_KEY, JSON.stringify({ content, meta })); else localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ } }, 600);
+    return () => clearTimeout(t);
+  }, [content, meta, DRAFT_KEY, editing]);
+  useEffect(() => {
+    const warn = (e) => { if (content && !editing) { e.preventDefault(); e.returnValue = ""; } };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [content, editing]);
 
   const sig = JSON.stringify([activeBrand.id, activeProduct?.id, content, imgSig(image), meta.type]);
   const fresh = raw !== null && checkedSig === sig;
@@ -142,24 +175,38 @@ export default function Review() {
   }, [selected]);
 
   async function runCheck(c = content, img = image, m = meta) {
+    const mine = ++seq.current;            // only the newest request may update the screen
+    if (ctl.current) ctl.current.abort();
+    ctl.current = new AbortController();
     setBusy(true);
+    setNotice("");
     try {
       const res = await review({
         content: c,
         meta: m,
-        image: img ? { name: img.name, alt: img.alt, fonts: img.fonts, textInImage: img.textInImage, analysis: img.analysis } : null,
+        image: img ? { name: img.name, alt: img.alt, fonts: img.fonts, textInImage: img.textInImage, analysis: img.analysis, data: img.data, mime: img.mime, size: img.size } : null,
         brandId: activeBrand.id,
         productId: activeProduct ? activeProduct.id : null,
         profile: activeBrand,
         product: activeProduct,
+        signal: ctl.current.signal,
       });
+      if (mine !== seq.current) return;
+      if (res.failed || !res.findings) {   // keep the previous results and the draft; say what happened
+        setNotice(res.notice || "The check could not run. Your draft is unchanged; try again.");
+        return;
+      }
       setRaw(res.findings);
       setEngine(res.engine);
-      if (res.notice) alert(res.notice);
+      setImageAnalysis(res.imageAnalysis || null);
+      setAiNotes(res.aiNotes || []);
+      if (res.notice) setNotice(res.notice);
       setCheckedSig(JSON.stringify([activeBrand.id, activeProduct?.id, c, imgSig(img), m.type]));
       setMode("review");
+    } catch (e) {
+      if (mine === seq.current) setNotice(e.message || "The check failed. Your draft is unchanged.");
     } finally {
-      setBusy(false);
+      if (mine === seq.current) setBusy(false);
     }
   }
 
@@ -217,7 +264,10 @@ export default function Review() {
         brandId: activeBrand.id,
         productId: activeProduct ? activeProduct.id : null,
       });
-      setRw(res);
+      if (res.failed) setNotice(res.notice || "The rewrite could not run. Your draft is unchanged.");
+      else setRw(res);
+    } catch (e) {
+      setNotice(e.message || "The rewrite failed. Your draft is unchanged.");
     } finally {
       setBusy(false);
     }
@@ -235,7 +285,7 @@ export default function Review() {
 
   async function resubmitRevision() {
     if (blocking.length > 0) {
-      alert("Please fix open critical/mandatory findings before resubmitting.");
+      setNotice("Please fix open critical/mandatory findings before resubmitting.");
       return;
     }
     const res = await dispatch({
@@ -251,7 +301,7 @@ export default function Review() {
   async function submitForReview() {
     if (editing) return resubmitRevision();
     if (blocking.length > 0) {
-      alert("Please fix open critical/mandatory findings or provide a written override reason before submitting.");
+      setNotice("Please fix open critical/mandatory findings or provide a written override reason before submitting.");
       return;
     }
     const title = meta.title.trim() || `${meta.type.toUpperCase()}: ${content.slice(0, 30)}…`;
@@ -520,6 +570,18 @@ export default function Review() {
           </Pill>
         </div>
 
+        {notice && <div className="warn-note" role="status"><Icon name="alert" size={15} /> {notice}</div>}
+        {imageAnalysis && (
+          <div className="panel" style={{ padding: 12, fontSize: 12.5 }}>
+            <b>Image analysis</b> <Pill tone={imageAnalysis.status === "ok" ? "ok" : "warn"}>{imageAnalysis.status === "ok" ? "Analysed by Gemini" : "Not analysed"}</Pill>
+            <p style={{ margin: "6px 0" }}>{imageAnalysis.summary || imageAnalysis.reason}</p>
+            {imageAnalysis.status === "ok" && imageAnalysis.matchesBrand === false && <p className="warn-note">The image does not appear to match the approved brand visuals.</p>}
+            {imageAnalysis.concept && <p className="muted small"><b>Suggested visual direction (text brief, not a generated image):</b> {typeof imageAnalysis.concept === "string" ? imageAnalysis.concept : JSON.stringify(imageAnalysis.concept)}</p>}
+            <p className="muted small">AI visual findings are advice. A person must approve any image before use.</p>
+          </div>
+        )}
+        {aiNotes.length > 0 && <p className="muted small">{aiNotes.join(" ")}</p>}
+
         {/* Severity Filter Counters */}
         <div className="g-resp" style={{ "--cols": "1fr 1fr 1fr" }}>
           <div style={{ background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 8px", textAlign: "center" }}>
@@ -543,8 +605,8 @@ export default function Review() {
         ) : open.length === 0 ? (
           <div style={{ textAlign: "center", padding: "30px 16px", background: "color-mix(in srgb, var(--ok) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--ok) 35%, transparent)", borderRadius: 12 }}>
             <Icon name="check" size={28} style={{ color: "var(--ok)", marginBottom: 8 }} />
-            <h3 className="serif" style={{ margin: "4px 0", color: "var(--ok)" }}>All Findings Resolved</h3>
-            <p className="muted small" style={{ margin: 0 }}>This copy is fully compliant with {activeBrand.name} approved standards.</p>
+            <h3 className="serif" style={{ margin: "4px 0", color: "var(--ok)" }}>No open findings</h3>
+            <p className="muted small" style={{ margin: 0 }}>No open findings remain in this check. A reviewer still makes the final approval decision.</p>
           </div>
         ) : (
           <div className="findings-list">

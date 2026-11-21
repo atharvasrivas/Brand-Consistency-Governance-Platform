@@ -128,6 +128,14 @@ def clean_product(d):
     return out
 
 
+def _append_version(store, kind, rec):
+    """History is append-only: a stored version is never replaced, whatever goes wrong upstream."""
+    key = f"{rec['id']}:{rec['version']}"
+    if store.get(kind, key):
+        raise ApiError(409, "This version already exists. Reload and try again.")
+    store.put(kind, key, rec)
+
+
 # ---------- brands ----------
 def list_brands(store):
     return sorted(store.list("brand"), key=lambda b: b["name"].lower())
@@ -145,7 +153,7 @@ def _unique(store, name, ignore=None):
         raise ApiError(409, f"A brand called “{name}” already exists")
 
 
-def save_brand(store, user, d, bid=None):
+def save_brand(store, user, d, bid=None, restored_from=None):
     new = clean_brand(d)
     with store.lock:
         if bid is None:
@@ -158,9 +166,11 @@ def save_brand(store, user, d, bid=None):
             _unique(store, new["name"], ignore=bid)
             rec = {**new, "id": bid, "version": cur["version"] + 1, "createdBy": cur["createdBy"], "createdAt": cur["createdAt"],
                    **({"demo": True} if cur.get("demo") else {})}
-        rec.update({"updatedBy": user["name"], "updatedAt": now(), "changeNote": s(d.get("changeNote"), 300)})
+        rec.update({"updatedBy": user["name"], "updatedById": user.get("id"), "updatedAt": now(), "changeNote": s(d.get("changeNote"), 300)})
+        if restored_from:
+            rec["restoredFrom"] = int(restored_from)
+        _append_version(store, "brand_version", rec)
         store.put("brand", rec["id"], rec)
-        store.put("brand_version", f"{rec['id']}:{rec['version']}", rec)
     return rec
 
 
@@ -179,7 +189,7 @@ def get_product(store, pid, brand_id=None):
     return p
 
 
-def save_product(store, user, brand_id, d, pid=None):
+def save_product(store, user, brand_id, d, pid=None, restored_from=None):
     get_brand(store, brand_id)
     new = clean_product(d)
     with store.lock:
@@ -194,9 +204,11 @@ def save_product(store, user, brand_id, d, pid=None):
                 raise ApiError(409, "This product was changed by someone else. Reload it before saving.", currentVersion=cur["version"])
             rec = {**new, "id": pid, "brandId": brand_id, "version": cur["version"] + 1, "createdBy": cur["createdBy"], "createdAt": cur["createdAt"],
                    **({"demo": True} if cur.get("demo") else {})}
-        rec.update({"updatedBy": user["name"], "updatedAt": now(), "changeNote": s(d.get("changeNote"), 300)})
+        rec.update({"updatedBy": user["name"], "updatedById": user.get("id"), "updatedAt": now(), "changeNote": s(d.get("changeNote"), 300)})
+        if restored_from:
+            rec["restoredFrom"] = int(restored_from)
+        _append_version(store, "product_version", rec)
         store.put("product", rec["id"], rec)
-        store.put("product_version", f"{rec['id']}:{rec['version']}", rec)
     return rec
 
 
@@ -239,5 +251,14 @@ def build_context(store, brand_id, product_id):
     if product:
         for sp in approved(product.get("specs", [])):
             ctx["specs"].append({**sp, "doc": f"{product['name']} fact sheet"})
+    # visual identity + wider brand context (used by the visual review and by the AI layer; none of it is invented)
+    ctx["guidelines"] = [{**g, "doc": label} for label, rec in (
+        (f"{brand['name']} brand profile", brand), (f"{product['name']} fact sheet" if product else "", product)) if rec for g in approved(rec.get("guidelines", []))]
+    ctx.update({"tagline": brand.get("tagline", ""), "values": brand.get("values", []), "targetAudience": brand.get("targetAudience", ""), "voiceText": brand.get("voice", "")})
+    assets = [{**a, "level": "brand"} for a in approved(brand.get("assets", []))] + ([{**a, "level": "product"} for a in approved(product.get("assets", []))] if product else [])
+    ctx["logoAssetId"], ctx["imageAssetId"] = brand.get("logoAssetId", ""), (product or {}).get("imageAssetId", "")
+    ctx["logoName"] = next((a["name"] for a in assets if a["assetId"] == ctx["logoAssetId"]), "")
+    ctx["assetRefs"] = [{"assetId": a["assetId"], "name": a["name"], "kind": a["kind"], "mime": a["mime"], "size": a["size"]} for a in assets if a["kind"] in ("logo", "image")]
+    ctx["hasVisual"] = bool(ctx["colours"] or ctx["fonts"] or ctx["logoAssetId"] or ctx["guidelines"] or ctx["deprecatedAssets"] or ctx["assetRefs"])
     ctx["hasApproved"] = bool(ctx["claims"] or ctx["restricted"] or ctx["terms"] or ctx["specs"] or ctx["toneAvoid"] or ctx["previousNames"])
     return ctx
