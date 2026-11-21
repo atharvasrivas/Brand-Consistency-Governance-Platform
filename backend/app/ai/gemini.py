@@ -202,6 +202,43 @@ class Gemini:
             break
         raise err
 
+    def _pick_model(self, avoid):
+        """Ask Google which models this key can use and choose the newest stable Flash model that supports generateContent."""
+        try:
+            r = self.s.get(f"{HOST}/models?pageSize=200", headers={"x-goog-api-key": self.key}, timeout=10)
+            models = (r.json() or {}).get("models", []) if r.status_code == 200 else []
+        except Exception:  # noqa: BLE001
+            return None
+        best, best_score = None, None
+        for m in models:
+            name = str(m.get("name", "")).replace("models/", "")
+            if name == avoid or "generateContent" not in (m.get("supportedGenerationMethods") or []):
+                continue
+            g = re.match(r"gemini-(\d+(?:\.\d+)?)-flash(.*)$", name)
+            if not g or re.search(r"lite|image|tts|live|audio|embed|thinking|exp|8b", g.group(2)):
+                continue
+            score = (0 if "preview" in g.group(2) or re.search(r"\d{3,}", g.group(2)) else 1, float(g.group(1)))
+            if best_score is None or score > best_score:
+                best, best_score = name, score
+        return best
+
+    def _call(self, path_for, body, timeout):
+        """POST with self-healing: if the configured model is gone (404), switch to one the key can use and retry once."""
+        try:
+            return self._post(path_for(self.model), body, timeout)
+        except GeminiError as e:
+            if e.kind != "model":
+                raise
+            new = self._pick_model(self.model)
+            if not new:
+                raise
+            old, self.model = self.model, new
+            self.log.append({"capability": "model", "ok": True, "at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"), "ms": 0,
+                             "model": new, "status": 404, "kind": "model", "error": None, "note": f"{old} was not available; switched to {new}"})
+            if "model" in body:
+                body["model"] = new
+            return self._post(path_for(new), body, timeout)
+
     def _json(self, cap, system, prompt, schema, images=None):
         """One structured request. `images` = [(bytes_or_b64, mime, label)]. Raises GeminiError and records the outcome."""
         t0 = time.monotonic()
@@ -215,11 +252,11 @@ class Gemini:
                     parts += [{"text": f"[{label}]"}, {"inlineData": {"mimeType": mime, "data": b64}}]
                 body = {"systemInstruction": {"parts": [{"text": system}]}, "contents": [{"role": "user", "parts": parts}],
                         "generationConfig": {"responseMimeType": "application/json", "responseSchema": _gs(schema), "temperature": 0.2}}
-                data = self._post(f"{HOST}/models/{self.model}:generateContent", body, self.image_timeout)
+                data = self._call(lambda m: f"{HOST}/models/{m}:generateContent", body, self.image_timeout)
                 text, finish = _extract_text(data)
             elif self.style == "interactions":
                 body = {"model": self.model, "input": f"{system}\n\n{prompt}", "response_format": {"type": "json_schema", "schema": schema}}
-                data = self._post(f"{HOST}/interactions", body, self.timeout)
+                data = self._call(lambda m: f"{HOST}/interactions", body, self.timeout)
                 text = "".join(c.get("text", "") for st in data.get("steps", []) if st.get("type") == "model_output" for c in st.get("content", []) if c.get("type") == "text")
                 if not text.strip():
                     raise GeminiError("empty", "Gemini returned no model output")
@@ -227,7 +264,7 @@ class Gemini:
             else:
                 body = {"systemInstruction": {"parts": [{"text": system}]}, "contents": [{"role": "user", "parts": [{"text": prompt}]}],
                         "generationConfig": {"responseMimeType": "application/json", "responseSchema": _gs(schema), "temperature": 0.2}}
-                data = self._post(f"{HOST}/models/{self.model}:generateContent", body, self.timeout)
+                data = self._call(lambda m: f"{HOST}/models/{m}:generateContent", body, self.timeout)
                 text, finish = _extract_text(data)
             out = _parse_json(text, finish)
         except GeminiError as e:

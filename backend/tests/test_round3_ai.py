@@ -331,3 +331,26 @@ def test_text_review_uses_richer_context_for_the_model():
     ctx = json.loads(sent["body"]["contents"][0]["parts"][0]["text"])["context"]
     assert any(s["name"] == "Engine" for s in ctx["specs"]) and "system" not in sent["body"]
     assert "specification" in sent["body"]["systemInstruction"]["parts"][0]["text"].lower()
+
+
+def test_unavailable_model_switches_to_one_the_key_can_use():
+    class N(Net):
+        def post(self, url, headers=None, json=None, timeout=None):
+            if "gemini-2.5-flash:" in url:
+                self.calls.append({"url": url})
+                return _Resp(404, {"error": {"message": "models/gemini-2.5-flash is no longer available to new users"}})
+            return super().post(url, headers, json, timeout)
+
+        def get(self, url, headers=None, timeout=None):
+            self.calls.append({"url": url})
+            return _Resp(200, {"models": [
+                {"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-3.0-flash-lite", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-3.0-flash", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-3.5-flash-preview-05", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/text-embedding-9", "supportedGenerationMethods": ["embedContent"]}]})
+    net = N(text={"findings": []})
+    ai = Gemini(Config(sqlite_path=":memory:", gemini_key="SECRET-KEY", gemini_backoff=0), net)
+    ai._json("suggest", "sys", "prompt", {"type": "object", "properties": {"findings": {"type": "array", "items": {"type": "string"}}}})
+    assert ai.model == "gemini-3.0-flash"
+    assert ai.last["suggest"]["ok"] is True and "SECRET-KEY" not in str(ai.status())
