@@ -220,6 +220,10 @@ class Gemini:
             score = (0 if "preview" in g.group(2) or re.search(r"\d{3,}", g.group(2)) else 1, float(g.group(1)))
             if best_score is None or score > best_score:
                 best, best_score = name, score
+        if not best:
+            for fallback in ("gemini-3.8-flash", "gemini-2.0-flash", "gemini-1.5-flash"):
+                if fallback != avoid:
+                    return fallback
         return best
 
     def _call(self, path_for, body, timeout):
