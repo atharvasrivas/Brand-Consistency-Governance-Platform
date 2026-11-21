@@ -166,6 +166,19 @@ def _specs(c, ctx):
     return out
 
 
+def _spec_facets(c, ctx):
+    """Facet-level comparison with the approved fact sheet (engine, power, acceleration, production run ...). See specs.py."""
+    from . import specs
+    who = ctx["productName"] or ctx["brandName"]
+    out = []
+    for i in specs.find(c, ctx):
+        fact = i["fact"]
+        source = src(fact["doc"], fact["ref"]) if fact else src(f"{who} approved facts", "No matching approved figure")
+        out.append(_raw(i["rule"], i["label"], "Facts & claims", i["sev"], i["quote"], i["start"], i["end"], kind=i["kind"], suggestion=i["suggestion"],
+                        why=i["why"], source=source, conf=i["conf"], human=i["human"], extra={"approvedFact": fact} if fact else None))
+    return out
+
+
 CLAIM_PATTERNS = [
     ("Unsupported superlative", r"(?<![\w-])(?:the\s+)?(?:best|fastest|cheapest|safest|leading|unbeatable|unmatched|world-class|most\s+(?:reliable|powerful|secure|popular|advanced|trusted|accurate)|#1|number[- ]one)(?![\w-])(?:[ \t]+(?:[A-Za-z]+[ \t]+){0,2}?(?:in|on|of)[ \t]+the[ \t]+(?:country|world|industry|market|planet))?"),
     ("Unsupported guarantee", r"(?<![\w-])(?:guaranteed?|100\s?%\s+(?:secure|safe|accurate|reliable|effective)|unhackable|risk[- ]free|never\s+fails?|always\s+works?|zero\s+(?:downtime|risk))(?![\w-])"),
@@ -227,7 +240,7 @@ def _names(c, ctx):
     return out
 
 
-DETECTORS = (_previous_names, _terms, _restricted, _specs, _tone, _unverified, _names)
+DETECTORS = (_previous_names, _terms, _restricted, _specs, _spec_facets, _tone, _unverified, _names)
 
 
 def _finish(raws, content):
@@ -316,6 +329,13 @@ def _review(content, meta, image, ctx):
     return findings + img
 
 
+BRIEF = ("key", "ruleId", "label", "category", "severity", "strictness", "kind", "scope", "quote", "suggestion", "why", "source", "needsHuman", "approvedFact", "options")
+
+
+def brief(f):
+    return {k: f[k] for k in BRIEF if k in f}
+
+
 def _rewrite(content, meta, ctx, dismissed):
     findings = [f for f in _review(content, meta, None, ctx) if f["key"] not in dismissed]
     spans = []
@@ -326,14 +346,22 @@ def _rewrite(content, meta, ctx, dismissed):
         if f["kind"] == "replace" and f.get("suggestion"):
             for r in f.get("ranges") or [{"start": f["start"], "end": f["end"]}]:
                 spans.append((r["start"], r["end"], f["suggestion"]))
-            applied.append({k: f[k] for k in ("key", "ruleId", "label", "quote", "suggestion", "strictness", "severity", "occurrences")})
+            applied.append({k: f[k] for k in ("key", "ruleId", "label", "quote", "suggestion", "strictness", "severity", "occurrences")} | {"why": f.get("why"), "source": f.get("source")})
         else:
             left.append({k: f.get(k) for k in ("key", "ruleId", "label", "quote", "kind", "severity", "suggestion", "options", "start", "end")})
     text = content
     for a, b, rep in sorted(spans, reverse=True):
         text = text[:a] + rep + text[b:]
+    # Never assume the rewrite fixed everything: check the result again, with the same rules, and report what is left.
     return {"text": text, "applied": applied, "skipped": [x for x in left if x["kind"] == "conflict"],
-            "needsPerson": [x for x in left if x["kind"] != "conflict"]}
+            "needsPerson": [x for x in left if x["kind"] != "conflict"], **_recheck(text, meta, ctx, dismissed)}
+
+
+def _recheck(text, meta, ctx, dismissed):
+    remaining = [brief(f) for f in _review(text, meta, None, ctx) if f["key"] not in dismissed and f["scope"] == "text"]
+    mandatory_left = [f for f in remaining if f["strictness"] == "mandatory"]
+    return {"remaining": remaining, "compliant": not mandatory_left,
+            "recheck": {"total": len(remaining), "mandatory": len(mandatory_left), "needsPerson": sum(1 for f in remaining if f.get("needsHuman"))}}
 
 
 def review(content, meta, image, ctx):
@@ -342,3 +370,8 @@ def review(content, meta, image, ctx):
 
 def rewrite(content, meta, ctx, dismissed=None):
     return _walk(_rewrite(to_js(content or ""), meta, _walk(ctx, to_js), {to_js(k) for k in (dismissed or set())}), from_js)
+
+
+def recheck(content, meta, ctx, dismissed=None):
+    """Run the rules over `content` again and report what is still unresolved (used on rewritten text)."""
+    return _walk(_recheck(to_js(content or ""), meta, _walk(ctx, to_js), {to_js(k) for k in (dismissed or set())}), from_js)

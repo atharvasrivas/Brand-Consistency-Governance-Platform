@@ -2,18 +2,25 @@
 from collections import Counter, defaultdict
 from datetime import datetime
 
+from . import governance
+
 
 def compute(subs, brand_id=None, product_id=None):
     if brand_id:
         subs = [s for s in subs if s.get("brandId") == brand_id]
     if product_id:
         subs = [s for s in subs if s.get("productId") == product_id]
+    all_subs = subs
     subs = [{**s, "status": "submitted" if s["status"] == "in_review" else s["status"]} for s in subs]
+    n_draft = sum(1 for s in subs if s["status"] == "draft")
+    subs = governance.live(subs)  # drafts are private work in progress: never counted
     by_status = Counter(s["status"] for s in subs)
     pending = by_status["submitted"] + by_status["under_review"] + by_status["resubmitted"]
     rules = defaultdict(lambda: {"count": 0, "submissions": set(), "category": ""})
     for s in subs:
         for f in s["findings"]:
+            if f.get("category") == "Content patterns":
+                continue
             key = f.get("guideline") or f.get("source") or f.get("label")
             key = key if isinstance(key, str) else (key.get("text") or key.get("name") or str(key.get("id", "")) if isinstance(key, dict) else str(key))
             r = rules[key]
@@ -22,6 +29,8 @@ def compute(subs, brand_id=None, product_id=None):
             r["category"] = f.get("category") or ""
     decided = [s for s in subs if s["status"] in ("approved", "rejected", "changes_requested") or len(s["versions"]) > 1]
     first_time = [s for s in subs if s["status"] == "approved" and len(s["versions"]) == 1]
+    # first-time approval = approved on the first version without being sent back, among submissions that have had a decision or a revision
+    first_time = [s for s in first_time if not any("Requested changes" in a.get("text", "") for a in s.get("activity", []))]
     ever_changes = [s for s in subs if len(s["versions"]) > 1 or s["status"] in ("changes_requested", "rejected")]
     rec = defaultdict(lambda: {"count": 0, "submissions": set(), "category": "", "severity": "suggestion"})
     cats, brands = Counter(), {}
@@ -33,6 +42,8 @@ def compute(subs, brand_id=None, product_id=None):
         b["approved"] += s["status"] == "approved"
         b["changesOrRejected"] += s["status"] in ("changes_requested", "rejected")
         for f in s["findings"]:
+            if f.get("category") == "Content patterns":
+                continue
             n = f.get("occurrences") or 1
             r = rec[f["label"]]
             r["count"] += n
@@ -61,11 +72,14 @@ def compute(subs, brand_id=None, product_id=None):
             if any(k in a.get("text", "") for k in ("Approved", "Requested changes", "Rejected")):
                 reviewers[a["by"]] += 1
     recurring = sorted(({"label": k, "category": v["category"], "severity": v["severity"], "count": v["count"], "submissions": len(v["submissions"])}
-                        for k, v in rec.items()), key=lambda x: (-x["count"], x["label"]))[:12]
+                        for k, v in rec.items() if len(v["submissions"]) >= 2), key=lambda x: (-x["count"], x["label"]))[:12]  # same definition as Drift Radar
     return {"totals": {"submissions": len(subs), "pending": pending, "inReview": pending, "draft": by_status["draft"], "submitted": by_status["submitted"],
                        "underReview": by_status["under_review"], "resubmitted": by_status["resubmitted"], "approved": by_status["approved"], "changesRequested": by_status["changes_requested"],
                        "rejected": by_status["rejected"], "approvedFirstTime": len(first_time), "neededRevisions": len(ever_changes),
-                       "firstTimeRate": round(len(first_time) / len(subs), 2) if subs else None},
+                       "decided": len(decided), "draftsExcluded": n_draft,
+                       "firstTimeRate": round(len(first_time) / len(decided), 2) if decided else None},
+            "definitions": {"submissions": "All non-draft submissions in scope", "firstTimeRate": "Approved on version 1 and never sent back, divided by submissions that have had a decision or a revision",
+                            "recurring": "Same finding in two or more submissions (identical to Drift Radar)"},
             "topRules": [{"rule": k, "category": v["category"], "count": v["count"], "submissions": len(v["submissions"])}
                          for k, v in sorted(rules.items(), key=lambda kv: (-kv[1]["count"], str(kv[0])))[:10]],
             "recurring": recurring, "byCategory": [{"category": k, "count": v} for k, v in cats.most_common()],

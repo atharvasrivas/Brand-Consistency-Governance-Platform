@@ -24,10 +24,14 @@ class Config:
         self.gemini_model = e("GEMINI_MODEL", "gemini-2.5-flash")
         self.gemini_style = e("GEMINI_API_STYLE", "generate_content").lower()
         self.gemini_timeout = float(e("GEMINI_TIMEOUT", "20"))
+        self.gemini_image_timeout = float(e("GEMINI_IMAGE_TIMEOUT", "45"))
+        self.gemini_retries = int(e("GEMINI_RETRIES", "1"))      # retries for HTTP 429/503 only
+        self.gemini_backoff = float(e("GEMINI_BACKOFF", "0.8"))
         self.allowed_origins = [o.strip() for o in e("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",") if o.strip()]
         self.allow_reset = _b("ALLOW_RESET", "0")
         self.demo_data = _b("ALLOW_DEMO_DATA", "1")
         self.max_content_chars = 50_000
         self.max_asset_bytes = 1_500_000
+        self.max_image_bytes = 1_400_000   # an uploaded advertisement, as sent for analysis (the browser resizes larger ones)
         for k, v in over.items():
             setattr(self, k, v)

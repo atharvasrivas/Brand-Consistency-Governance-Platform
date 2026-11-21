@@ -8,22 +8,30 @@
 Status lifecycle: draft -> submitted -> under_review -> (approved | rejected | changes_requested);
 changes_requested -> resubmitted -> under_review ... Every decision, comment and revision is recorded with who and when.
 """
+import base64
+import binascii
+
 from ..auth import ApiError
 from ..engine import review as engine
+from . import assets
 from . import brands as B
 
 TYPES = ("blog", "social", "ad", "email", "document")
 STATUSES = ("draft", "submitted", "under_review", "changes_requested", "resubmitted", "approved", "rejected")
 PENDING = ("submitted", "under_review", "resubmitted")  # waiting on a reviewer
 LABEL = {"approved": "Approved the content", "changes_requested": "Requested changes", "rejected": "Rejected the content"}
-KEEP_IMG = ("IMG-PALETTE", "IMG-CONTRAST")  # need browser-side pixel analysis; the server cannot recompute them
+KEEP_IMG = ("IMG-PALETTE", "IMG-CONTRAST", "IMG-AI", "IMG-UNANALYSED")  # browser pixel analysis / AI vision: the server cannot recompute these on submit
+ADVISORY_IMG = ("IMG-AI", "IMG-UNANALYSED")  # always flexible and routed to a person, whatever the browser claims
+IMG_MIMES = ("image/png", "image/jpeg", "image/webp", "image/gif")
 
 
 def light(f):
     st = f.get("status") or "open"
     return {"key": f["key"], "ruleId": f.get("ruleId"), "label": f.get("label"), "category": f.get("category"), "severity": f.get("severity", "suggestion"),
             "strictness": f.get("strictness", "flexible"), "quote": f.get("quote"), "status": st, "note": f.get("note"), "suggestion": f.get("suggestion"),
-            "source": f.get("source"), "occurrences": f.get("occurrences", 1), "needsHuman": bool(f.get("needsHuman")) if st == "open" else False}
+            "source": f.get("source"), "occurrences": f.get("occurrences", 1), "needsHuman": bool(f.get("needsHuman")) if st == "open" else False,
+            **({"approvedFact": f["approvedFact"]} if f.get("approvedFact") else {}), **({"applied": str(f["applied"])[:300]} if f.get("applied") else {}),
+            **({"scope": f["scope"]} if f.get("scope") else {})}
 
 
 def clean_meta(d):
@@ -33,7 +41,9 @@ def clean_meta(d):
     return {"type": m["type"], "audience": str(m.get("audience") or "")[:300], "purpose": str(m.get("purpose") or "")[:300]}
 
 
-def clean_image(img):
+def clean_image(img, max_bytes=1_400_000):
+    """The advert image as sent for review. `data` (base64) + `mime` carry the pixels for AI analysis; they are validated here and are
+    never kept inline on a submission (see persist_image)."""
     if not img:
         return None
     if not isinstance(img, dict):
@@ -45,7 +55,36 @@ def clean_image(img):
                and isinstance(c.get("share"), (int, float))]
         lc = a.get("lowContrast") if isinstance(a.get("lowContrast"), dict) and isinstance(a["lowContrast"].get("ratio"), (int, float)) else None
         out["analysis"] = {"offPalette": off, "lowContrast": lc}
+    mime = str(img.get("mime") or "")[:60]
+    if img.get("data"):
+        if mime not in IMG_MIMES:
+            out["unsupported"] = mime or "unknown"
+        else:
+            try:
+                raw = base64.b64decode(str(img["data"]), validate=True)
+            except (binascii.Error, ValueError):
+                raise ApiError(422, "The image could not be read")
+            if not raw:
+                raise ApiError(422, "The image is empty")
+            if len(raw) > max_bytes:
+                raise ApiError(413, f"The image is too large to analyse ({len(raw) // 1000} KB, limit {max_bytes // 1000} KB). Use a smaller copy.")
+            out.update(data=str(img["data"]), mime=mime, size=len(raw))
+    else:
+        if mime:
+            out["mime"] = mime
+        if img.get("assetId"):
+            out["assetId"] = str(img["assetId"])[:40]
+        if img.get("unsupported"):
+            out["unsupported"] = str(img["unsupported"])[:60]
     return out
+
+
+def persist_image(store, user, image):
+    """Keep the picture as a stored asset (so a reviewer can see what was checked) and drop the inline base64 from the submission record."""
+    if not image or not image.get("data"):
+        return image
+    aid = assets.save_raw(store, user, image.get("name") or "advert image", image["mime"], image["data"], image.get("size", 0))
+    return {k: v for k, v in image.items() if k != "data"} | {"assetId": aid}
 
 
 def scope_from(d):
@@ -79,7 +118,8 @@ def verified_findings(content, meta, image, ctx, client):
         out.append(f)
     for k, cf in cl.items():
         if k not in seen and (cf.get("status") == "accepted" or str(cf.get("ruleId", "")) in KEEP_IMG):
-            out.append(light({**cf, "status": cf.get("status") if cf.get("status") in ("accepted", "rejected") else "open"}))
+            adv = {"strictness": "flexible", "needsHuman": True} if str(cf.get("ruleId", "")) in ADVISORY_IMG else {}
+            out.append(light({**cf, **adv, "status": cf.get("status") if cf.get("status") in ("accepted", "rejected") else "open"}))
     return out, blockers
 
 
@@ -115,7 +155,7 @@ def create(store, cfg, user, d):
         raise ApiError(422, "Add a title")
     content = d.get("content")
     check_content(cfg, content)
-    meta, image = clean_meta(d), clean_image(d.get("image"))
+    meta, image = clean_meta(d), clean_image(d.get("image"), cfg.max_image_bytes)
     ctx = B.build_context(store, *scope_from(d))
     findings, blockers = verified_findings(content, meta, image, ctx, d.get("findings"))
     draft = bool(d.get("draft"))
@@ -128,6 +168,7 @@ def create(store, cfg, user, d):
                 if (o["authorId"] == user["id"] and o["brandId"] == ctx["brand"]["id"] and o.get("productId") == (ctx["product"]["id"] if ctx["product"] else None)
                         and o["status"] in PENDING and o["versions"][-1]["content"] == content):
                     raise ApiError(409, f"This exact content is already waiting for review as {o['id']}.", submissionId=o["id"])
+        image = persist_image(store, user, image)  # only once the submission is certain to be created
         sub = {"id": _next_id(store), "title": title, **meta, "authorId": user["id"], "author": user["name"], "authorDesignation": user.get("designation"),
                "status": "draft" if draft else "submitted", "createdAt": at, "updatedAt": at,
                "versions": [{"n": 1, "content": content, "at": at, "by": user["name"], "note": "Draft saved" if draft else "First submission"}], "image": image, "findings": findings,
@@ -173,12 +214,13 @@ def resubmit(store, cfg, user, sid, d):
         fields["type"] = d["type"]
     merged = {**sub, **fields}
     meta = clean_meta(merged)
-    image = clean_image(d["image"]) if "image" in d else sub.get("image")
+    image = clean_image(d["image"], cfg.max_image_bytes) if "image" in d else sub.get("image")
     ctx = B.build_context(store, sub["brandId"], sub["productId"])  # a revision stays on the same brand/product, latest profile
     findings, blockers = verified_findings(content, meta, image, ctx, d.get("findings"))
     if blockers:
         raise ApiError(422, "Mandatory brand rules still need a decision", blockers=blockers)
     at, n = B.now(), len(sub["versions"]) + 1
+    image = persist_image(store, user, image)
     with store.lock:
         sub.update(fields)
         sub.update({"image": image, "status": "resubmitted", "updatedAt": at, "findings": findings, "noApprovedContent": not ctx["hasApproved"]})
@@ -202,7 +244,7 @@ def decide(store, user, sid, d):
     if sub["status"] not in PENDING:
         raise ApiError(409, f"This submission is already {sub['status'].replace('_', ' ')}.")
     if sub["authorId"] == user["id"]:
-        raise ApiError(403, "You cannot decide your own submission. Ask another reviewer.")
+        raise ApiError(403, "You cannot approve or reject your own submission: approval is an independent check, so a different reviewer or owner has to make this decision. Ask another reviewer.")
     comment = (d.get("comment") or "").strip()
     if status != "approved" and not comment:
         raise ApiError(422, "Say what needs to change: a comment is required.")

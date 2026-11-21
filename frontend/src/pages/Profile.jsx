@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import Icon from "../components/Icon.jsx";
 import { Field, PageHead, Pill, ColorPickerField, FileUploadField, AssetList } from "../components/ui.jsx";
+import VersionHistory from "../components/VersionHistory.jsx";
 import FactSheetAssistant from "../components/FactSheetAssistant.jsx";
 import { useStore } from "../store.jsx";
 import { findConflicts } from "../engine/checker.js";
@@ -496,18 +497,17 @@ export default function Profile() {
       {/* TAB 5: History */}
       {activeTab === "history" && (
         <section className="panel">
-          <div className="panel-h"><h2>Brand Changelog</h2></div>
-          <ol className="timeline">
-            {[...changelog].reverse().map((c) => (
-              <li key={c.version}>
-                <span className="tl-dot" />
-                <div>
-                  <b>Version {c.version}</b> <span className="muted small">· {c.by} · {timeAgo(c.at)}</span>
-                  <p>{c.summary}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
+          <div className="panel-h"><h2>Version history</h2></div>
+          {API_CONFIGURED && activeBrand._srv ? (
+            <VersionHistory base={`/api/brands/${activeBrand.id}`} canRestore={role === "owner"} currentVersion={activeBrand.version}
+              onRestored={() => { setSavedMsg("Restored as a new version. Reloading…"); setTimeout(() => window.location.reload(), 700); }} />
+          ) : (
+            <ol className="timeline">
+              {[...changelog].reverse().map((c) => (
+                <li key={c.version}><span className="tl-dot" /><div><b>Version {c.version}</b> <span className="muted small">· {c.by} · {timeAgo(c.at)}</span><p>{c.summary}</p></div></li>
+              ))}
+            </ol>
+          )}
         </section>
       )}
 

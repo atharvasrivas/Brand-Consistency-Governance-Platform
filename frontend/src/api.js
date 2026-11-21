@@ -19,8 +19,15 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiFetch(method, path, body) {
-  const res = await fetch(`${BASE}${path}`, {
+const TIMEOUT_MS = 70000; // AI calls can take a while; never wait forever
+
+export async function apiFetch(method, path, body, opts = {}) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), opts.timeout || TIMEOUT_MS);
+  if (opts.signal) opts.signal.addEventListener("abort", () => ctl.abort());
+  let res;
+  try {
+    res = await fetch(`${BASE}${path}`, { signal: ctl.signal,
     method,
     headers: {
       "Content-Type": "application/json",
@@ -29,7 +36,13 @@ export async function apiFetch(method, path, body) {
       "X-User-Id": actor.id || "",
     },
     body: body === undefined ? undefined : JSON.stringify(body),
-  });
+    });
+  } catch (e) {
+    if (e && e.name === "AbortError") throw new ApiError(0, opts.signal && opts.signal.aborted ? "Cancelled" : "The server took too long to answer. Your work is kept; try again.");
+    throw new ApiError(0, "Could not reach the server. Check your connection and try again.");
+  } finally {
+    clearTimeout(timer);
+  }
   let data = null;
   try {
     data = await res.json();
@@ -61,10 +74,11 @@ export async function review(payload) {
         image: payload.image,
         brandId: payload.brandId,
         productId: payload.productId,
-      });
-      return { findings: data.findings, engine: "api", notice: data.notice, profileVersion: data.profileVersion };
+      }, { signal: payload.signal });
+      return { findings: data.findings, engine: "api", notice: data.notice, profileVersion: data.profileVersion, imageAnalysis: data.imageAnalysis, aiNotes: data.aiNotes, aiLevel: data.aiLevel };
     } catch (e) {
-      if (e instanceof ApiError) return { findings: [], engine: "api", notice: e.message };
+      if (e instanceof ApiError && e.status === 0) return { findings: null, engine: "api", notice: e.message, failed: true };
+      if (e instanceof ApiError) return { findings: null, engine: "api", notice: e.message, failed: true };
       console.warn("Review API unavailable, falling back to local multi-brand rules:", e.message);
     }
   }
@@ -82,11 +96,11 @@ export async function rewrite(payload) {
           dismissed: payload.dismissed,
           brandId: payload.brandId,
           productId: payload.productId,
-        })),
+        }, { signal: payload.signal })),
         engine: "api",
       };
     } catch (e) {
-      if (e instanceof ApiError) return { text: payload.content, applied: [], skipped: [], engine: "api", notice: e.message };
+      if (e instanceof ApiError) return { text: payload.content, applied: [], skipped: [], engine: "api", notice: e.message, failed: true, compliant: false };
       console.warn("Rewrite API unavailable, falling back to local rewrite:", e.message);
     }
   }
@@ -114,6 +128,7 @@ export async function recheck(submission, profile, product = null) {
     profile,
     product,
   });
+  if (!res.findings) throw new ApiError(0, res.notice || "The re-check could not run");
   const prior = new Map((submission.findings || []).map((f) => [f.key, f]));
   const findings = res.findings.map((f) => {
     const p = prior.get(f.key);

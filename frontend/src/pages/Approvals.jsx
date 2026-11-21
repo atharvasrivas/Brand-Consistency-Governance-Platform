@@ -45,9 +45,11 @@ function Detail({ s }) {
   const pending = PENDING.includes(s.status);
   const canStart = ["submitted", "resubmitted"].includes(s.status);
   const currentUserName = state.user?.name || "Reviewer";
-  const isAuthor = s.author === currentUserName;
-  // Non-negotiable rule: author cannot decide their own submission
-  const canDecide = isDecider && (!isAuthor || role === "owner");
+  const isAuthor = (s.authorId && state.user?.id ? s.authorId === state.user.id : s.author === currentUserName);
+  // Non-negotiable rule, enforced by the server too: nobody (owners included) decides their own submission
+  const canDecide = isDecider && !isAuthor;
+
+  const selfNote = isDecider && isAuthor ? "You submitted this, so you can't approve or reject it. Approval is an independent check: another reviewer or owner has to decide." : "";
 
   async function decide(status) {
     if (status !== "approved" && !comment.trim()) {
@@ -252,6 +254,7 @@ function Detail({ s }) {
             value={comment}
             onChange={(e) => setComment(e.target.value)}
           />
+          {selfNote && <p className="warn-note" role="note">{selfNote}</p>}
           {canStart && canDecide && (
             <button className="btn" onClick={() => dispatch({ type: "startReview", id: s.id })}>
               <Icon name="search" size={16} /> Start review

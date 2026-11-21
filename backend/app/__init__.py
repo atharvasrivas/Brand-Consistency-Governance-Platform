@@ -21,7 +21,7 @@ def create_app(cfg=None, store=None, ai=None):
     cfg = cfg or Config()
     if cfg.auth_mode == "jwt" and not cfg.jwt_secret:
         raise RuntimeError("AUTH_MODE=jwt needs SUPABASE_JWT_SECRET")
-    app.config.update(CFG=cfg, MAX_CONTENT_LENGTH=2_500_000, STORE=store or build_store(cfg), AI=ai or Gemini(cfg))
+    app.config.update(CFG=cfg, MAX_CONTENT_LENGTH=3_200_000, STORE=store or build_store(cfg), AI=ai or Gemini(cfg))
     register_error_handlers(app)
     app.register_blueprint(bp)
 
