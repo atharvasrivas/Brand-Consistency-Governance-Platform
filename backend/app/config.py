@@ -21,7 +21,7 @@ class Config:
         self.supabase_url = e("SUPABASE_URL", "").rstrip("/")
         self.supabase_key = e("SUPABASE_SERVICE_KEY", "")
         self.gemini_key = e("GEMINI_API_KEY", "")
-        self.gemini_model = e("GEMINI_MODEL", "gemini-2.5-flash")
+        self.gemini_model = e("GEMINI_MODEL", "gemini-1.5-flash")
         self.gemini_style = e("GEMINI_API_STYLE", "generate_content").lower()
         self.gemini_timeout = float(e("GEMINI_TIMEOUT", "20"))
         self.gemini_image_timeout = float(e("GEMINI_IMAGE_TIMEOUT", "45"))
