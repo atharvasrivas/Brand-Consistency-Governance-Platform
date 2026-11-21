@@ -61,20 +61,22 @@ function Radar({ brandFilter, onSelectBrand }) {
   const [picked, setPicked] = useState(null);
 
   const scopedSubmissions = useMemo(() => {
-    if (brandFilter === "all") return submissions;
-    return submissions.filter((s) => s.brandId === brandFilter);
+    const live = submissions.filter((s) => s.status !== "draft"); // drafts are never analysed
+    if (brandFilter === "all") return live;
+    return live.filter((s) => s.brandId === brandFilter);
   }, [submissions, brandFilter]);
 
   const groups = useMemo(() => {
     const m = new Map();
     scopedSubmissions.forEach((s) => (s.findings || []).forEach((f) => {
+      if (f.category === "Content patterns") return;
       const g = m.get(f.ruleId) || { id: f.ruleId, label: f.label, category: f.category, subs: new Map(), total: 0, rejected: 0, source: f.source };
       g.total += 1;
       if (f.status === "rejected") g.rejected += 1;
       g.subs.set(s.id, s);
       m.set(f.ruleId, g);
     }));
-    return [...m.values()].sort((a, b) => b.subs.size - a.subs.size || b.total - a.total);
+    return [...m.values()].filter((g) => g.subs.size >= 2).sort((a, b) => b.subs.size - a.subs.size || b.total - a.total);
   }, [scopedSubmissions]);
 
   const top = groups.slice(0, 8);
@@ -111,7 +113,7 @@ function Radar({ brandFilter, onSelectBrand }) {
   return (
     <>
       <ServerStats brandId={brandFilter === "all" ? "" : brandFilter} />
-      <div className="kpis">
+      <div className="kpis" style={API_CONFIGURED ? { display: "none" } : undefined}>
         <div className="kpi"><b>{scopedSubmissions.length}</b><span>Submissions Checked</span></div>
         <div className="kpi"><b>{scopedSubmissions.reduce((n, s) => n + (s.findings || []).length, 0)}</b><span>Total Issues Flagged</span></div>
         <div className="kpi"><b>{mandatoryOpen}</b><span>Critical Items Open</span></div>
@@ -209,7 +211,7 @@ function ServerStats({ brandId }) {
         <h3>Compliance by brand</h3>
         <Rows max={1} rows={d.byBrand.map((b) => ({ label: `${b.brandName || b.brandId}${b.productName ? " / " + b.productName : ""}`, value: b.complianceRate || 0, text: `${pct(b.complianceRate)} of ${b.submissions}` }))} />
         <h3>Approved first time</h3>
-        <p><b>{pct(d.totals.firstTimeRate)}</b> <small>({d.totals.approvedFirstTime} of {d.totals.submissions}; {d.totals.neededRevisions} needed revisions)</small></p>
+        <p><b>{pct(d.totals.firstTimeRate)}</b> <small>({d.totals.approvedFirstTime} approved first time of {d.totals.decided} decided or revised; {d.totals.draftsExcluded} drafts excluded)</small></p>
       </div>
       <div className="panel">
         <h3>Submissions over time</h3>

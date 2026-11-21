@@ -160,6 +160,8 @@ export default function Review() {
   const blocking = mandOpen.filter((f) => !f.needsHuman);
   const routed = open.filter((f) => f.needsHuman);
   const guideOpen = open.filter((f) => f.strictness !== "critical" && f.strictness !== "mandatory");
+  // accepted corrections are sent too, so they are saved with the submission and counted in Insights
+  const sendable = [...findings, ...resolved.filter((r) => !findings.some((f) => f.key === r.key)).map((r) => ({ ...r, status: "accepted" }))];
   const done = [...resolved, ...findings.filter((f) => f.status !== "open")];
 
   useEffect(() => {
@@ -278,7 +280,7 @@ export default function Review() {
     const res = await dispatch({
       type: "submit", draft: true,
       submission: { title, brandId: activeBrand.id, productId: activeProduct ? activeProduct.id : null, type: meta.type, audience: meta.audience, purpose: meta.purpose,
-        image, findings, versions: [{ n: 1, content }], comments: [] },
+        image, findings: sendable, versions: [{ n: 1, content }], comments: [] },
     });
     if (res) { setToast("Draft saved. Find it under My Submissions."); }
   }
@@ -289,7 +291,7 @@ export default function Review() {
       return;
     }
     const res = await dispatch({
-      type: "resubmit", id: editing.id, content, findings, note: note || "Revised after feedback",
+      type: "resubmit", id: editing.id, content, findings: sendable, note: note || "Revised after feedback",
       fields: { title: meta.title, type: meta.type, audience: meta.audience, purpose: meta.purpose },
     });
     if (res) {
@@ -317,7 +319,7 @@ export default function Review() {
         audience: meta.audience,
         purpose: meta.purpose,
         image,
-        findings,
+        findings: sendable,
         author: state.user?.name || "Creator",
         profileVersion: activeBrand.version || 1,
         versions: [{ n: 1, content, at: new Date().toISOString(), by: state.user?.name || "Creator", note: note || "Initial draft" }],
