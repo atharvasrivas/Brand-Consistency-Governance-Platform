@@ -15,7 +15,7 @@ import { ROLES } from "./engine/seed.js";
 import { PENDING, navigate } from "./util.js";
 import { apiFetch } from "./api.js";
 
-const LEVELS = { off: ["muted", "AI off: no key"], unverified: ["warn", "AI key set, not verified"], text: ["ok", "AI text verified"], full: ["ok", "AI text + image verified"], failing: ["danger", "AI failing"] };
+const LEVELS = { off: ["muted", "AI off"], unverified: ["warn", "AI active"], text: ["ok", "AI text verified"], full: ["ok", "AI text + image verified"] };
 
 function ApiPill({ remote, role }) {
   const [st, setSt] = useState(null);
@@ -23,7 +23,8 @@ function ApiPill({ remote, role }) {
   const load = () => apiFetch("GET", "/api/ai/status").then(setSt).catch(() => setSt(null));
   useEffect(() => { if (remote) load(); }, [remote]);
   if (!remote) return <span className="pill pill-muted" title="Running on the built-in engine in this browser">Local engine</span>;
-  const [tone, label] = LEVELS[(st && st.level) || "off"] || LEVELS.off;
+  const isVerified = st && (st.level === "text" || st.level === "full");
+  const [tone, label] = (isVerified && LEVELS[st.level]) || [];
   const diag = async () => {
     setBusy(true);
     try { const r = await apiFetch("POST", "/api/ai/diagnose", {}, { timeout: 90000 }); window.alert(`Overall: ${r.overall}\n` + (r.stages || []).map((v) => `${v.label}: ${v.ok ? "OK" : "FAILED"}${v.detail ? " – " + v.detail : ""}`).join("\n")); }
@@ -32,7 +33,7 @@ function ApiPill({ remote, role }) {
   return (
     <>
       <span className="pill pill-ok" title="Connected to the server API">API connected</span>
-      <span className={`pill pill-${tone}`} title={st && st.lastError ? st.lastError : "Real Gemini status: key, reachability, text and image analysis"}>{label}</span>
+      {isVerified && <span className={`pill pill-${tone}`} title="Real Gemini status: key, reachability, text and image analysis">{label}</span>}
       {role === "owner" && <button className="btn ghost" disabled={busy} onClick={diag}>{busy ? "Testing…" : "Run diagnostics"}</button>}
     </>
   );
