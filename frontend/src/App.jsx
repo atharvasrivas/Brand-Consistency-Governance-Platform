@@ -90,6 +90,7 @@ function Shell({ route, children, onEditUser }) {
   return (
     <div className="app">
       <header className="topbar">
+        <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById("main")?.focus(); }}>Skip to content</a>
         <button className="brand" onClick={() => navigate("/")} aria-label="Home">
           <span className="logo"><Icon name="shield" size={18} /></span>
           <span><b>Brand Governance</b><small>Platform</small></span>
@@ -148,7 +149,7 @@ function Shell({ route, children, onEditUser }) {
         </div>
       )}
 
-      <main className="main">{children}</main>
+      <main className="main" id="main" tabIndex={-1}>{children}</main>
 
       <footer className="foot">
         <span>
@@ -222,6 +223,11 @@ function AccessDenied({ role, needed = "Reviewer or Owner" }) {
 
 export default function App() {
   const route = useRoute();
+  useEffect(() => {
+    const names = { "/": "", "/responsible": "Responsible AI", ...Object.fromEntries(ALL_NAV.map((n) => [n.path, n.label])) };
+    const n = names[route];
+    document.title = n ? `${n} · Brand Governance` : "Brand Consistency and Governance Platform";
+  }, [route]);
   const { state, dispatch } = useStore();
   const [showOnboarding, setShowOnboarding] = useState(false);
 

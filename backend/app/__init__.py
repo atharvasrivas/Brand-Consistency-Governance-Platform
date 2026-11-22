@@ -41,6 +41,10 @@ def create_app(cfg=None, store=None, ai=None):
     def preflight(_):
         return "", 204
 
+    @app.get("/favicon.ico")
+    def favicon():
+        return "", 204
+
     @app.get("/")
     def root():
         return {"service": "Brand Consistency and Governance Platform API", "health": "/api/health"}
