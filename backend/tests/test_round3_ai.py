@@ -291,10 +291,10 @@ def test_gemini_retries_only_rate_limits_once():
     cfg = Config(gemini_key="k", gemini_backoff=0)
     net = Net(fail=(429, {}))
     Gemini(cfg, net).suggest("x y z", {}, {"claims": [], "specs": [], "restricted": [], "terms": [], "brandName": "B", "productName": None, "voice": {}}, [])
-    assert len(net.calls) == 2
+    assert len([c for c in net.calls if c.get('body') is not None]) == 2
     net = Net(fail=(500, {}))
     Gemini(cfg, net).suggest("x y z", {}, {"claims": [], "specs": [], "restricted": [], "terms": [], "brandName": "B", "productName": None, "voice": {}}, [])
-    assert len(net.calls) == 1
+    assert len([c for c in net.calls if c.get("body") is not None]) == 1
 
 
 def test_diagnose_verifies_each_layer_for_real(client):
@@ -362,3 +362,23 @@ def test_gemini_3_request_has_room_to_think_and_no_forced_temperature():
     ai._json("suggest", "sys", "prompt", {"type": "object", "properties": {}})
     cfg = net.calls[-1]["body"]["generationConfig"]
     assert "temperature" not in cfg and cfg["maxOutputTokens"] >= 4096 and net.calls[-1]["url"].endswith("gemini-3.8-flash:generateContent")
+
+
+def test_overloaded_model_is_answered_by_another_model():
+    class N(Net):
+        def post(self, url, headers=None, json=None, timeout=None):
+            if "gemini-3.8-flash:" in url:
+                self.calls.append({"url": url, "body": json})
+                return _Resp(503, {"error": {"message": "This model is currently experiencing high demand."}})
+            return super().post(url, headers, json, timeout)
+
+        def get(self, url, headers=None, timeout=None):
+            self.calls.append({"url": url, "body": None})
+            return _Resp(200, {"models": [
+                {"name": "models/gemini-3.8-flash", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-3.8-flash-lite", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-3.1-flash", "supportedGenerationMethods": ["generateContent"]}]})
+    net = N(text={"findings": []})
+    ai = Gemini(Config(sqlite_path=":memory:", gemini_key="SECRET-KEY", gemini_backoff=0, gemini_model="gemini-3.8-flash"), net)
+    out = ai._json("suggest", "sys", "prompt", {"type": "object", "properties": {"findings": {"type": "array", "items": {"type": "string"}}}})
+    assert out == {"findings": []} and ai.answered_by == "gemini-3.1-flash" and ai.model == "gemini-3.8-flash"

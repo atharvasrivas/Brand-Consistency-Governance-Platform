@@ -34,7 +34,7 @@ function ApiPill({ remote, role }) {
     <>
       <span className="pill pill-ok" title="Connected to the server API">API connected</span>
       {isVerified && <span className={`pill pill-${tone}`} title="Real Gemini status: key, reachability, text and image analysis">{label}</span>}
-      {role === "owner" && <button className="btn ghost" disabled={busy} onClick={diag}>{busy ? "Testing…" : "Run diagnostics"}</button>}
+      {role === "owner" && /[?&]diag=1/.test(window.location.search) && <button className="btn ghost" disabled={busy} onClick={diag}>{busy ? "Testing…" : "Run diagnostics"}</button>}
     </>
   );
 }

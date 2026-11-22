@@ -151,7 +151,8 @@ class Gemini:
         self.retries, self.backoff = getattr(cfg, "gemini_retries", 1), getattr(cfg, "gemini_backoff", 0.8)
         self.thinking = getattr(cfg, "gemini_thinking", "low")
         self.s = session or requests.Session()
-        self.last = {}                 # capability -> most recent outcome
+        self.last = {}
+        self.answered_by = None                 # capability -> most recent outcome
         self.log = deque(maxlen=40)    # recent outcomes, newest last
 
     @property
@@ -237,6 +238,25 @@ class Gemini:
             cfg["thinkingConfig"] = {"thinkingLevel": self.thinking}  # these requests are short extraction tasks, not puzzles
         return cfg
 
+    def _alternates(self, avoid, limit=2):
+        """Other Gemini text models this key can use, best first: stable Flash, then older Flash, then Flash-Lite."""
+        try:
+            r = self.s.get(f"{HOST}/models?pageSize=200", headers={"x-goog-api-key": self.key}, timeout=8)
+            models = (r.json() or {}).get("models", []) if r.status_code == 200 else []
+        except Exception:  # noqa: BLE001
+            return []
+        scored = []
+        for m in models:
+            name = str(m.get("name", "")).replace("models/", "")
+            g = re.match(r"gemini-(\d+(?:\.\d+)?)-flash(.*)$", name)
+            if name == avoid or not g or "generateContent" not in (m.get("supportedGenerationMethods") or []):
+                continue
+            if re.search(r"image|tts|live|audio|embed|thinking|exp|8b|robotics|computer", g.group(2)):
+                continue
+            lite, preview = "lite" in g.group(2), "preview" in g.group(2) or bool(re.search(r"\d{3,}", g.group(2)))
+            scored.append(((0 if lite else 1, 0 if preview else 1, float(g.group(1))), name))
+        return [n for _, n in sorted(scored, reverse=True)][:limit]
+
     def _call(self, path_for, body, timeout):
         """POST with self-healing: if the configured model is gone (404), switch to one the key can use and retry once."""
         try:
@@ -246,6 +266,21 @@ class Gemini:
                 self.thinking = ""   # this model does not accept the setting: stop sending it
                 body["generationConfig"].pop("thinkingConfig", None)
                 return self._post(path_for(self.model), body, timeout)
+            if e.kind in ("server", "quota"):
+                # the chosen model is overloaded or rate-limited right now: answer from another model rather than failing
+                for alt in self._alternates(self.model):
+                    b = {**body, "generationConfig": {k: v for k, v in (body.get("generationConfig") or {}).items() if k != "thinkingConfig"}} if "generationConfig" in body else dict(body)
+                    if re.match(r"gemini-([3-9]|\d{2,})", alt) and self.thinking and "generationConfig" in b:
+                        b["generationConfig"]["thinkingConfig"] = {"thinkingLevel": self.thinking}
+                    try:
+                        data = self._post(path_for(alt), b, timeout)
+                        self.log.append({"capability": "model", "ok": True, "at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"), "ms": 0,
+                                         "model": alt, "status": e.status, "kind": e.kind, "error": None, "note": f"{self.model} was overloaded; this request was answered by {alt}"})
+                        self.answered_by = alt
+                        return data
+                    except GeminiError:
+                        continue
+                raise
             if e.kind != "model":
                 raise
             new = self._pick_model(self.model)
@@ -453,7 +488,7 @@ class Gemini:
         def plain():
             t = time.monotonic()
             try:
-                d = self._post(f"{HOST}/models/{self.model}:generateContent",
+                d = self._call(lambda m: f"{HOST}/models/{m}:generateContent",
                                {"systemInstruction": {"parts": [{"text": "Answer as briefly as possible."}]}, "contents": [{"role": "user", "parts": [{"text": "Reply with the single word OK."}]}], "generationConfig": {"maxOutputTokens": 64}}, self.timeout)
                 txt, _ = _extract_text(d)
                 return ("plain", "Plain request answered (no JSON schema)", True, f"“{txt.strip()[:20]}” in {time.monotonic() - t:.1f}s", 200, (time.monotonic() - t) * 1000)
