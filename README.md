@@ -30,3 +30,6 @@ Changes reach `main` through pull requests only.
 - `POST /api/ai/diagnose` (owner only) tests key, reachability, model, a text request and an image request separately.
 - Set `GEMINI_API_KEY` on the API project. Uploaded brand images are stored as assets and served by id; do not upload confidential images.
 - Version history: `/api/brands/<id>/versions`, `/versions/<n>`, `/versions/compare?from=&to=`, `POST /versions/<n>/restore` (creates a new version).
+
+### Optional second AI provider
+Set `FALLBACK_API_KEY` (and optionally `FALLBACK_BASE_URL`, `FALLBACK_MODEL`; any OpenAI-compatible API such as OpenAI, Groq or OpenRouter). It is used only when Gemini cannot answer; its output goes through the same validators.

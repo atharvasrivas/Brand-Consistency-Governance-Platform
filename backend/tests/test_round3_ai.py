@@ -382,3 +382,23 @@ def test_overloaded_model_is_answered_by_another_model():
     ai = Gemini(Config(sqlite_path=":memory:", gemini_key="SECRET-KEY", gemini_backoff=0, gemini_model="gemini-3.8-flash"), net)
     out = ai._json("suggest", "sys", "prompt", {"type": "object", "properties": {"findings": {"type": "array", "items": {"type": "string"}}}})
     assert out == {"findings": []} and ai.answered_by == "gemini-3.1-flash" and ai.model == "gemini-3.8-flash"
+
+
+def test_fallback_provider_answers_when_gemini_is_down():
+    from app.ai.gemini import Gemini
+    from app.config import Config
+
+    class R:
+        def __init__(self, code, data): self.status_code, self._d = code, data
+        def json(self): return self._d
+
+    class S:
+        def post(self, url, **kw):
+            if "generativelanguage" in url:
+                return R(503, {"error": {"message": "high demand", "status": "UNAVAILABLE"}})
+            return R(200, {"choices": [{"message": {"content": '{"ok": true}'}}]})
+
+    g = Gemini(Config(sqlite_path=":memory:", gemini_key="k", fallback_key="f", store="sqlite", gemini_retries=0), session=S())
+    g._alternates = lambda *a, **k: []
+    assert g._json("text", "sys", "p", {"type": "object"}) == {"ok": True}
+    assert g.answered_by == g.fb_model

@@ -150,6 +150,7 @@ class Gemini:
         self.image_timeout = max(self.timeout, getattr(cfg, "gemini_image_timeout", 45.0))
         self.retries, self.backoff = getattr(cfg, "gemini_retries", 1), getattr(cfg, "gemini_backoff", 0.8)
         self.thinking = getattr(cfg, "gemini_thinking", "low")
+        self.fb_key, self.fb_url, self.fb_model = getattr(cfg, "fallback_key", ""), getattr(cfg, "fallback_url", ""), getattr(cfg, "fallback_model", "")
         self.s = session or requests.Session()
         self.last = {}
         self.answered_by = None                 # capability -> most recent outcome
@@ -157,7 +158,29 @@ class Gemini:
 
     @property
     def enabled(self):
-        return bool(self.key)
+        return bool(self.key or self.fb_key)
+
+    def _fallback(self, system, prompt, schema, images):
+        """Second provider (OpenAI-compatible chat completions). Same JSON contract; results go through the same validators."""
+        content = [{"type": "text", "text": prompt}]
+        for raw, mime, label in images or []:
+            b64 = raw if isinstance(raw, str) else base64.b64encode(raw).decode()
+            content += [{"type": "text", "text": f"[{label}]"}, {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}]
+        body = {"model": self.fb_model, "response_format": {"type": "json_object"},
+                "messages": [{"role": "system", "content": system + "\nReturn ONLY a JSON object matching this JSON schema: " + json.dumps(schema)},
+                             {"role": "user", "content": content}]}
+        try:
+            r = self.s.post(f"{self.fb_url}/chat/completions", headers={"Authorization": f"Bearer {self.fb_key}"}, json=body,
+                            timeout=self.image_timeout if images else self.timeout)
+            data = r.json()
+        except (requests.RequestException, ValueError) as e:
+            raise GeminiError("unreachable", f"Fallback provider unavailable ({type(e).__name__})")
+        if r.status_code != 200:
+            raise GeminiError("server", f"Fallback provider returned HTTP {r.status_code}", r.status_code)
+        try:
+            return _parse_json(data["choices"][0]["message"]["content"], None)
+        except (KeyError, IndexError, TypeError):
+            raise GeminiError("parse", "Fallback provider returned an unexpected response")
 
     # ---------- bookkeeping ----------
     def _scrub(self, text):
@@ -299,6 +322,8 @@ class Gemini:
         try:
             if not self.enabled:
                 raise GeminiError("no_key", "GEMINI_API_KEY is not set")
+            if not self.key:
+                raise GeminiError("no_key", "GEMINI_API_KEY is not set")
             if images:  # vision is only sent through generateContent
                 parts = [{"text": prompt}]
                 for raw, mime, label in images:
@@ -322,6 +347,16 @@ class Gemini:
                 text, finish = _extract_text(data)
             out = _parse_json(text, finish)
         except GeminiError as e:
+            if self.fb_key:   # Gemini could not answer: let the second provider try before giving up
+                try:
+                    out = self._fallback(system, prompt, schema, images)
+                    self.answered_by = self.fb_model
+                    self.log.append({"capability": cap, "ok": True, "at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"), "ms": 0,
+                                     "model": self.fb_model, "status": e.status, "kind": e.kind, "error": None, "note": "answered by the fallback provider"})
+                    self._record(cap, True, (time.monotonic() - t0) * 1000)
+                    return out
+                except GeminiError:
+                    pass
             e.message = self._scrub(e.message)  # whatever the upstream said, the key must never travel further than this
             self._record(cap, False, (time.monotonic() - t0) * 1000, e)
             raise

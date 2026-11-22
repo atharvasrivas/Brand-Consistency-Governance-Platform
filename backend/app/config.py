@@ -29,6 +29,9 @@ class Config:
         self.gemini_style = e("GEMINI_API_STYLE", "generate_content").lower()
         self.gemini_timeout = float(e("GEMINI_TIMEOUT", "35"))
         self.gemini_image_timeout = float(e("GEMINI_IMAGE_TIMEOUT", "45"))
+        self.fallback_key = e("FALLBACK_API_KEY", "")      # optional second provider (any OpenAI-compatible API), used only when Gemini cannot answer
+        self.fallback_url = e("FALLBACK_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+        self.fallback_model = e("FALLBACK_MODEL", "gpt-4o-mini")
         self.gemini_retries = int(e("GEMINI_RETRIES", "1"))      # retries for HTTP 429/503 only
         self.gemini_backoff = float(e("GEMINI_BACKOFF", "0.8"))
         self.allowed_origins = [o.strip() for o in e("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",") if o.strip()]
