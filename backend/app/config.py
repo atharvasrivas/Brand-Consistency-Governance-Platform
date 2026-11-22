@@ -25,9 +25,10 @@ class Config:
         if model in ("gemini-2.5-flash", "gemini-2.5-pro"):
             model = "gemini-3.8-flash"
         self.gemini_model = model
+        self.gemini_thinking = e("GEMINI_THINKING", "low").strip()   # reasoning effort for Gemini 3.x; "" to leave at the model default
         self.gemini_style = e("GEMINI_API_STYLE", "generate_content").lower()
-        self.gemini_timeout = float(e("GEMINI_TIMEOUT", "25"))
-        self.gemini_image_timeout = float(e("GEMINI_IMAGE_TIMEOUT", "30"))
+        self.gemini_timeout = float(e("GEMINI_TIMEOUT", "35"))
+        self.gemini_image_timeout = float(e("GEMINI_IMAGE_TIMEOUT", "45"))
         self.gemini_retries = int(e("GEMINI_RETRIES", "1"))      # retries for HTTP 429/503 only
         self.gemini_backoff = float(e("GEMINI_BACKOFF", "0.8"))
         self.allowed_origins = [o.strip() for o in e("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",") if o.strip()]

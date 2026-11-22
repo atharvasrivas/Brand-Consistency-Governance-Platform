@@ -302,7 +302,7 @@ def test_diagnose_verifies_each_layer_for_real(client):
     c = app_with(net)
     assert c.post("/api/ai/diagnose", headers=CREATOR).status_code == 403
     d = c.post("/api/ai/diagnose", headers=OWNER).json
-    assert d["overall"] == "full" and [s["id"] for s in d["stages"]] == ["key", "reachable", "model", "text", "image"] and all(s["ok"] for s in d["stages"])
+    assert d["overall"] == "full" and [s["id"] for s in d["stages"]] == ["key", "reachable", "model", "plain", "text", "image"] and all(s["ok"] for s in d["stages"])
     assert any(x["url"].endswith("/models/gemini-3.8-flash") and x["headers"]["x-goog-api-key"] == "SECRET-KEY" for x in net.calls if x["body"] is None)
     sent_img = [x for x in net.calls if x["body"] and any("inlineData" in p for p in x["body"]["contents"][0]["parts"])][0]
     assert base64.b64decode(sent_img["body"]["contents"][0]["parts"][2]["inlineData"]["data"]).startswith(b"\x89PNG")

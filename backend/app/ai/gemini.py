@@ -149,6 +149,7 @@ class Gemini:
         self.key, self.model, self.style, self.timeout = cfg.gemini_key, cfg.gemini_model, cfg.gemini_style, cfg.gemini_timeout
         self.image_timeout = max(self.timeout, getattr(cfg, "gemini_image_timeout", 45.0))
         self.retries, self.backoff = getattr(cfg, "gemini_retries", 1), getattr(cfg, "gemini_backoff", 0.8)
+        self.thinking = getattr(cfg, "gemini_thinking", "low")
         self.s = session or requests.Session()
         self.last = {}                 # capability -> most recent outcome
         self.log = deque(maxlen=40)    # recent outcomes, newest last
@@ -232,6 +233,8 @@ class Gemini:
         cfg = {"responseMimeType": "application/json", "responseSchema": _gs(schema), "maxOutputTokens": 8192}
         if not re.match(r"gemini-([3-9]|\d{2,})", self.model):
             cfg["temperature"] = 0.2
+        elif self.thinking:
+            cfg["thinkingConfig"] = {"thinkingLevel": self.thinking}  # these requests are short extraction tasks, not puzzles
         return cfg
 
     def _call(self, path_for, body, timeout):
@@ -239,6 +242,10 @@ class Gemini:
         try:
             return self._post(path_for(self.model), body, timeout)
         except GeminiError as e:
+            if e.kind == "bad_request" and "thinking" in e.message.lower() and "thinkingConfig" in (body.get("generationConfig") or {}):
+                self.thinking = ""   # this model does not accept the setting: stop sending it
+                body["generationConfig"].pop("thinkingConfig", None)
+                return self._post(path_for(self.model), body, timeout)
             if e.kind != "model":
                 raise
             new = self._pick_model(self.model)
@@ -437,30 +444,53 @@ class Gemini:
                 stage("reachable", "Gemini service reachable", False, f"{type(e).__name__}: could not connect")
                 stage("model", f"Model “{self.model}” available", None, "not checked")
 
-        # 2. a real structured text request, and the real text-analysis path
+        # 2-4. real requests, run side by side so the whole check fits inside the server's time limit
+        from concurrent.futures import ThreadPoolExecutor
+
         sample_ctx = {"brand": "Diagnostic", "product": None, "voice": {"personality": ["plain"], "toneGuidance": "Plain and factual."},
                       "approvedClaims": [], "specs": [{"id": "s1", "name": "Capacity", "value": "1.7 litres"}], "restrictedClaims": [], "terminology": [{"id": "t1", "avoid": "cheap", "prefer": "affordable"}]}
-        t0 = time.monotonic()
-        try:
-            raw = self._json("diagnose:text", "You are a brand-compliance reviewer. Using ONLY the context, find problems in the draft. Return JSON only.",
-                             json.dumps({"context": sample_ctx, "draft": "This cheap kettle holds 2 litres."}), FINDINGS_SCHEMA)
-            n = len(raw.get("findings", [])) if isinstance(raw, dict) else 0
-            stage("text", "Successful AI request + text analysis", isinstance(raw, dict) and isinstance(raw.get("findings"), list),
-                  f"structured JSON returned, {n} finding(s)", 200, (time.monotonic() - t0) * 1000)
-        except GeminiError as e:
-            stage("text", "Successful AI request + text analysis", False, e.message, e.status, (time.monotonic() - t0) * 1000)
 
-        # 3. a real image request: the model must actually see the picture (a plain red square)
-        t0 = time.monotonic()
-        schema = {"type": "object", "properties": {"dominantColour": {"type": "string"}}, "required": ["dominantColour"]}
-        try:
-            raw = self._json("diagnose:image", "Describe the image. Return JSON only.", "What is the single dominant colour of this image? Answer in the field dominantColour.",
-                             schema, images=[(_red_png(), "image/png", "diagnostic image")])
-            seen = str(raw.get("dominantColour", "")) if isinstance(raw, dict) else ""
-            ok = "red" in seen.lower()
-            stage("image", "Successful image analysis", ok, f"model saw: “{seen[:40]}”" if ok else f"model answered “{seen[:40]}” for a red image: it is not reading the pixels", 200, (time.monotonic() - t0) * 1000)
-        except GeminiError as e:
-            stage("image", "Successful image analysis", False, e.message, e.status, (time.monotonic() - t0) * 1000)
+        def plain():
+            t = time.monotonic()
+            try:
+                d = self._post(f"{HOST}/models/{self.model}:generateContent",
+                               {"systemInstruction": {"parts": [{"text": "Answer as briefly as possible."}]}, "contents": [{"role": "user", "parts": [{"text": "Reply with the single word OK."}]}], "generationConfig": {"maxOutputTokens": 64}}, self.timeout)
+                txt, _ = _extract_text(d)
+                return ("plain", "Plain request answered (no JSON schema)", True, f"“{txt.strip()[:20]}” in {time.monotonic() - t:.1f}s", 200, (time.monotonic() - t) * 1000)
+            except GeminiError as e:
+                return ("plain", "Plain request answered (no JSON schema)", False, e.message, e.status, (time.monotonic() - t) * 1000)
+
+        def text():
+            t = time.monotonic()
+            try:
+                raw = self._json("diagnose:text", "You are a brand-compliance reviewer. Using ONLY the context, find problems in the draft. Return JSON only.",
+                                 json.dumps({"context": sample_ctx, "draft": "This cheap kettle holds 2 litres."}), FINDINGS_SCHEMA)
+                n = len(raw.get("findings", [])) if isinstance(raw, dict) else 0
+                return ("text", "Successful AI request + text analysis", isinstance(raw, dict) and isinstance(raw.get("findings"), list),
+                        f"structured JSON returned, {n} finding(s)", 200, (time.monotonic() - t) * 1000)
+            except GeminiError as e:
+                return ("text", "Successful AI request + text analysis", False, e.message, e.status, (time.monotonic() - t) * 1000)
+
+        def image():
+            t = time.monotonic()
+            schema = {"type": "object", "properties": {"dominantColour": {"type": "string"}}, "required": ["dominantColour"]}
+            try:
+                raw = self._json("diagnose:image", "Describe the image. Return JSON only.", "What is the single dominant colour of this image? Answer in the field dominantColour.",
+                                 schema, images=[(_red_png(), "image/png", "diagnostic image")])
+                seen = str(raw.get("dominantColour", "")) if isinstance(raw, dict) else ""
+                ok = "red" in seen.lower()
+                return ("image", "Successful image analysis", ok, f"model saw: “{seen[:40]}”" if ok else f"model answered “{seen[:40]}” for a red image: it is not reading the pixels", 200, (time.monotonic() - t) * 1000)
+            except GeminiError as e:
+                return ("image", "Successful image analysis", False, e.message, e.status, (time.monotonic() - t) * 1000)
+
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            futs = [ex.submit(f) for f in (plain, text, image)]
+            for f in futs:
+                sid, label, ok, detail, status, ms = f.result()
+                if sid == "plain":
+                    stages.append({"id": sid, "label": label, "ok": ok, "detail": self._scrub(detail)[:300], "status": status, "ms": int(ms)})
+                else:
+                    stage(sid, label, ok, detail, status, ms)
 
         by = {s["id"]: s["ok"] for s in stages}
         overall = "full" if by.get("text") and by.get("image") else "text" if by.get("text") else "failing"
