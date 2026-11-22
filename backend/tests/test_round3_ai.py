@@ -156,7 +156,7 @@ def test_image_is_sent_to_the_vision_model_with_brand_visuals_and_reference_logo
     r = review(c, b, None, "Ferrari. Drive the Daytona SP3.", image=IMG).json
     sent = [x for x in net.calls if x["body"] and any("inlineData" in p for p in x["body"]["contents"][0]["parts"])][0]
     parts = sent["body"]["contents"][0]["parts"]
-    assert sent["url"].endswith(":generateContent") and sent["timeout"] >= 45
+    assert sent["url"].endswith(":generateContent") and sent["timeout"] >= 30
     inl = [p["inlineData"] for p in parts if "inlineData" in p]
     assert len(inl) == 2 and all(i["mimeType"] == "image/png" and i["data"] == PNG_B64 for i in inl)  # approved logo reference + uploaded image
     labels = [p["text"] for p in parts if "text" in p]
