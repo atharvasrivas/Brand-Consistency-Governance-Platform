@@ -146,6 +146,21 @@ def _stamped(sub, level, pid):
 
 
 def impact(store, brand_id, decisions):
+    """One brand, or every brand when none is chosen."""
+    if brand_id:
+        return _impact_one(store, brand_id, decisions)
+    outs = []
+    for b in B.list_brands(store):
+        try:
+            outs.append(_impact_one(store, b["id"], decisions))
+        except ApiError:
+            continue
+    aff = sorted((r for o in outs for r in o["affected"]), key=lambda r: (not (not r["decision"] or r["decision"]["decision"] == "reopen"), r["status"] == "approved", r["submissionId"]))
+    sc = {k: sum(o["scanned"][k] for o in outs) for k in ("submissions", "versionChanges", "clearedByRecheck")}
+    return {"affected": aff, "open": sum(o["open"] for o in outs), "scanned": sc, "warnings": sorted({w for o in outs for w in o["warnings"]})[:10]}
+
+
+def _impact_one(store, brand_id, decisions):
     """Compares every consecutive pair of saved versions of the brand and each product, and lists the saved submissions whose
     current text still uses wording that a later version changed. A submission re-checked against the newer version is not listed.
     One bad record is reported in `warnings`; it never stops the scan."""
@@ -266,6 +281,10 @@ def _case(text):
 
 
 def conflicts(store, brand_id, decisions):
+    if not brand_id:
+        outs = [conflicts(store, b["id"], decisions) for b in B.list_brands(store)]
+        lst = [c for o in outs for c in o["conflicts"]]
+        return {"conflicts": lst, "open": sum(o["open"] for o in outs)}
     brand = B.get_brand(store, brand_id)
     scopes = [(brand, "brand", brand["name"], None)] + [(p, "product", p["name"], p["id"]) for p in B.list_products(store, brand_id)]
     found = []

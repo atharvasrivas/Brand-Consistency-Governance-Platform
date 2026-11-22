@@ -74,9 +74,8 @@ function Drift({ brandId }) {
 }
 
 function Impact({ brandId }) {
-  const [s, load] = useLoad("/api/governance/impact", brandId, !!brandId);
+  const [s, load] = useLoad("/api/governance/impact", brandId, true);
   const [err, setErr] = useState("");
-  if (!brandId) return <Empty icon="file" title="Select a brand">Impact is calculated per brand.</Empty>;
   const decide = async (key, decision) => {
     try { await apiFetch("POST", "/api/governance/impact/decision", { key, decision }); setErr(""); load(); } catch (e) { setErr(e.message); }
   };
@@ -115,9 +114,8 @@ function Impact({ brandId }) {
 }
 
 function Conflicts({ brandId, isOwner }) {
-  const [s, load] = useLoad("/api/governance/conflicts", brandId, !!brandId);
+  const [s, load] = useLoad("/api/governance/conflicts", brandId, true);
   const [err, setErr] = useState("");
-  if (!brandId) return <Empty icon="file" title="Select a brand">Conflicts are detected within one brand and its products.</Empty>;
   const resolve = async (key, resolution) => {
     try { await apiFetch("POST", "/api/governance/conflicts/resolve", { key, resolution }); setErr(""); load(); } catch (e) { setErr(e.message); }
   };
@@ -154,7 +152,7 @@ export default function Governance() {
     <div>
       <PageHead eyebrow="Governance" title="Brand Governance Tools">
         <select className="inp" value={brandId} onChange={(e) => setBrandId(e.target.value)} aria-label="Brand">
-          <option value="">All brands (drift only)</option>
+          <option value="">All brands</option>
           {state.brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
       </PageHead>

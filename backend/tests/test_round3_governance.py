@@ -67,3 +67,12 @@ def test_reviewer_cannot_approve_own_submission(client):
     s = submit(client, b["id"], None, "A calm hello.", OWNER)
     r = client.post(f"/api/submissions/{s['id']}/decision", headers=OWNER, json={"status": "approved"})
     assert r.status_code == 403 and "independent" in r.json["error"].lower()
+
+
+def test_impact_and_conflicts_work_across_all_brands(client):
+    b = mk_brand(client)
+    sub = submit(client, b["id"], None, "A flimsy kettle for you.")
+    put(client, b, terminology=[{"avoid": "flimsy", "prefer": "light"}], changeNote="new avoid")
+    r = client.get("/api/governance/impact", headers=REV)
+    assert r.status_code == 200 and r.json["open"] == 1 and r.json["affected"][0]["submissionId"] == sub["id"]
+    assert client.get("/api/governance/conflicts", headers=REV).status_code == 200
