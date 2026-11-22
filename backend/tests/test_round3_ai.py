@@ -350,7 +350,15 @@ def test_unavailable_model_switches_to_one_the_key_can_use():
                 {"name": "models/gemini-3.5-flash-preview-05", "supportedGenerationMethods": ["generateContent"]},
                 {"name": "models/text-embedding-9", "supportedGenerationMethods": ["embedContent"]}]})
     net = N(text={"findings": []})
-    ai = Gemini(Config(sqlite_path=":memory:", gemini_key="SECRET-KEY", gemini_backoff=0), net)
+    ai = Gemini(Config(sqlite_path=":memory:", gemini_key="SECRET-KEY", gemini_backoff=0, gemini_model="gemini-2.5-flash"), net)
     ai._json("suggest", "sys", "prompt", {"type": "object", "properties": {"findings": {"type": "array", "items": {"type": "string"}}}})
     assert ai.model == "gemini-3.0-flash"
     assert ai.last["suggest"]["ok"] is True and "SECRET-KEY" not in str(ai.status())
+
+
+def test_gemini_3_request_has_room_to_think_and_no_forced_temperature():
+    net = Net(text={"findings": []})
+    ai = Gemini(Config(sqlite_path=":memory:", gemini_key="SECRET-KEY", gemini_backoff=0, gemini_model="gemini-3.8-flash"), net)
+    ai._json("suggest", "sys", "prompt", {"type": "object", "properties": {}})
+    cfg = net.calls[-1]["body"]["generationConfig"]
+    assert "temperature" not in cfg and cfg["maxOutputTokens"] >= 4096 and net.calls[-1]["url"].endswith("gemini-3.8-flash:generateContent")

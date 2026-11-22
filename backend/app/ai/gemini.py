@@ -226,6 +226,14 @@ class Gemini:
                     return fallback
         return best
 
+    def _gen_cfg(self, schema):
+        """Gemini 3.x models are reasoning models: they need room for thinking in the output budget, and Google advises leaving
+        temperature at its default for them. Older models keep the low temperature that makes the JSON steadier."""
+        cfg = {"responseMimeType": "application/json", "responseSchema": _gs(schema), "maxOutputTokens": 8192}
+        if not re.match(r"gemini-([3-9]|\d{2,})", self.model):
+            cfg["temperature"] = 0.2
+        return cfg
+
     def _call(self, path_for, body, timeout):
         """POST with self-healing: if the configured model is gone (404), switch to one the key can use and retry once."""
         try:
@@ -255,7 +263,7 @@ class Gemini:
                     b64 = raw if isinstance(raw, str) else base64.b64encode(raw).decode()
                     parts += [{"text": f"[{label}]"}, {"inlineData": {"mimeType": mime, "data": b64}}]
                 body = {"systemInstruction": {"parts": [{"text": system}]}, "contents": [{"role": "user", "parts": parts}],
-                        "generationConfig": {"responseMimeType": "application/json", "responseSchema": _gs(schema), "temperature": 0.2}}
+                        "generationConfig": self._gen_cfg(schema)}
                 data = self._call(lambda m: f"{HOST}/models/{m}:generateContent", body, self.image_timeout)
                 text, finish = _extract_text(data)
             elif self.style == "interactions":
@@ -267,7 +275,7 @@ class Gemini:
                 finish = None
             else:
                 body = {"systemInstruction": {"parts": [{"text": system}]}, "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                        "generationConfig": {"responseMimeType": "application/json", "responseSchema": _gs(schema), "temperature": 0.2}}
+                        "generationConfig": self._gen_cfg(schema)}
                 data = self._call(lambda m: f"{HOST}/models/{m}:generateContent", body, self.timeout)
                 text, finish = _extract_text(data)
             out = _parse_json(text, finish)
