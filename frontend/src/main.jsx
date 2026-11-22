@@ -1,5 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 import App from "./App.jsx";
 import { StoreProvider } from "./store.jsx";
 import "./styles.css";
@@ -25,6 +26,7 @@ createRoot(document.getElementById("root")).render(
   <Boundary>
     <StoreProvider>
       <App />
+      <SpeedInsights />
     </StoreProvider>
   </Boundary>
 );
